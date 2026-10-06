@@ -1,5 +1,22 @@
 # Design Decisions
 
+This document describes the current implementation against the [backend assignment](https://github.com/neustackapp/assignment/blob/main/be/README.md). Later user-approved changes supersede the original implementation plan: active reward policy comes only from environment variables, and the database stores historical order snapshots rather than an active policy or singleton counter. Product administration, diagrams, Swagger UI, and a Postman walkthrough were added during follow-up work.
+
+## Ambiguities and selected semantics
+
+| Unspecified behavior                 | Selected rule                                                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Milestone scope and order            | Store-wide committed order ordinal; discounted orders count; failures and replays do not. Concurrent arrival order does not determine the winner. |
+| Reward ownership                     | The customer placing the milestone order owns its coupon; it is not a public bearer promotion.                                                    |
+| Automatic versus admin issuance      | Checkout issues atomically; admin generation recovers the oldest eligible missing reward, one per request.                                        |
+| Coupon lifecycle                     | Single redemption, no expiry, at most one coupon per checkout, usable only after the earning order.                                               |
+| Price or stock changes               | No reservations or locked cart prices; revalidate current products at checkout and preserve purchase snapshots.                                   |
+| Quantity changes and removals        | PUT replaces absolute quantity; deleting an absent item from an open cart is a no-op.                                                             |
+| Payment success                      | Successful SQLite commit represents payment success; no provider is called.                                                                       |
+| Policy changes                       | Restart applies new environment values to future orders; old order eligibility and coupon percentages remain unchanged.                           |
+| Customer identity and administration | Trusted customer IDs; `/api/admin/products`, `/api/admin/coupons`, and `/api/admin/report` are administrative operations without authentication.  |
+| Product stock updates                | Admin PATCH sets absolute available inventory; product deletion is not provided.                                                                  |
+
 ## Invariants
 
 1. Inventory never becomes negative; only a committed purchase consumes it.
@@ -19,7 +36,7 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 **Options considered:** In-memory maps with an application mutex; SQLite transactions; PostgreSQL with row locks.
 
-**Choice:** Drizzle over better-sqlite3, foreign keys, WAL, a five-second busy timeout, and `BEGIN IMMEDIATE` for write operations. Repository reads and service writes use the same active transaction. Transactions contain no `await` or external calls.
+**Choice:** Drizzle over better-sqlite3, foreign keys, WAL for file databases, a five-second busy timeout, and `BEGIN IMMEDIATE` for multi-step writes such as checkout, cart edits, product updates, seed, and coupon recovery. Customer creation is a single atomic INSERT. Repository reads and service writes use the same active transaction. Transactions contain no `await` or external calls.
 
 **Why:** SQLite provides durable atomicity and coordinates independent local processes. Acquiring the writer lock before reading avoids making decisions from an outdated snapshot before upgrading to a writer. Conditional inventory decrements and coupon redemption provide explicit checks in addition to serialization.
 
@@ -37,6 +54,10 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 **Consequences:** Identical success returns the original `201` and a replay header. Changed inputs conflict. Failed attempts leave no key and can be corrected/retried. Records are retained indefinitely for this version. Fingerprints exclude changing cart contents because a successful replay must remain tied to the original purchase. Customer/cart creation do not implement idempotency.
 
+Checkout first loads the cart to establish the trusted customer scope, then checks the key before validating open/nonempty state. It validates live items and coupon ownership, calculates bounded totals, conditionally decrements stock, inserts the order and item snapshots, and conditionally redeems the coupon. Order insertion precedes redemption because `redeemedOrderId` is a foreign key. It then closes the cart, issues any reward, stores the successful response, and commits before HTTP delivery. Any exception rolls back all effects. There is no separately updated counter: `latestOrderOrdinal + 1` is computed under the writer lock.
+
+Replay uses `Idempotency-Replayed: true`. On a timeout or `503 DATABASE_BUSY` with `Retry-After: 1`, retry the same cart/coupon/key; do not create a new purchase to recover a missing response. Reusing a key with another existing cart or coupon yields `409 IDEMPOTENCY_CONFLICT`; a new key on a completed cart yields `409 CART_ALREADY_CHECKED_OUT`.
+
 ## Decision: Decimal INR interface, integer paise storage
 
 **Context:** Users expect prices such as INR 200.34; the brief requires no floating-point rounding errors.
@@ -48,6 +69,8 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 **Why:** Decimal strings preserve readable prices, while minor-unit storage is simple and exact. JavaScript safe integer limits are explicitly checked before storing numbers. Reports aggregate BigInt values so total revenue is not limited to a single order's bound.
 
 **Consequences:** API clients must treat monetary strings as decimal amounts. Currency is fixed to INR, with no currency conversion, tax, or shipping. Inputs with exponent notation, negatives, or more than two fractional digits are rejected. Percentage discount is floored once on the subtotal: `floor(subtotalPaise * percent / 100)`. For 200.34 at 10%, discount is 20.03 and total is 180.31. A 100% coupon yields exactly zero.
+
+Parsing accepts nonnegative canonical decimal strings with zero, one, or two fractional digits, including `"0"`, `"200"`, and `"200.3"`; outputs always have two digits. Leading-zero forms such as `"0200.34"`, whitespace, plus signs, and numeric JSON money values are rejected. Stored paise and per-order totals cannot exceed `Number.MAX_SAFE_INTEGER` (INR `"90071992547409.91"`). Line totals, subtotal, inventory, quantities, and ordinals are bounded before persistence. Report revenue can exceed that bound because it is formatted directly from BigInt; aggregated product quantity still has a safe-integer bound.
 
 ## Decision: Live cart prices and no reservations
 
@@ -97,6 +120,8 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 **Consequences:** Changes take effect after restart. All instances must receive the same configuration; mixed configurations during a rolling restart are not coordinated by the database. The global order sequence continues unchanged, with new eligibility computed as `ordinal % active n === 0`. The migration backfills existing orders from the legacy database policy before dropping it, without changing coupons or replay responses. Seeding never resets purchases, prices, or inventory.
 
+Defaults are `REWARD_EVERY_N_ORDERS=5` and `REWARD_DISCOUNT_PERCENT=10`; startup requires a positive safe integer n and an integer x from 1 through 100. There is no reward-policy update route. For example, changing n from 5 to 3 after ordinal 5 makes the next successful order (6) a milestone; it does not start a fresh three-order counting period.
+
 ## Decision: Reporting from snapshots in a consistent read transaction
 
 **Context:** Revenue and coupon status must reconcile while checkout continues, and reporting cannot create rewards.
@@ -120,6 +145,8 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 **Why:** Stable codes make retry behavior explicit. No real payment integration is required, and an asynchronous fake would obscure the transaction boundaries without addressing an actual provider.
 
 **Consequences:** No network side effects occur inside transactions. Real payments cannot simply be added inside this transaction: they need a durable pending/payment state machine, provider idempotency, outbox/webhooks, reconciliation, and compensation. API errors expose useful domain details without leaking database internals.
+
+Malformed JSON returns `400 INVALID_JSON`, oversized bodies return `413 BODY_TOO_LARGE` (16kb limit), and unknown routes return `404 ROUTE_NOT_FOUND`. Known domain failures are returned directly; unexpected failures are logged through the configurable logger (default `console.error`). This is not a production structured logging or monitoring system.
 
 ## Implemented and intentionally deferred
 
@@ -147,9 +174,19 @@ A concrete generated-code correction: an early read-only report test compared a 
 
 ## Time spent and next two hours
 
-Approximate AI-assisted implementation and verification time: 30 minutes, including the environment-policy revision and excluding earlier setup/planning and subsequent human review. Add actual human review and submission time before sending the assignment.
+The recorded implementation/evaluation window from the scaffold commit at 19:40 IST through the compiled smoke verification during this review at 23:34 IST on 6 October 2026 is approximately **3 hours 54 minutes elapsed**, including follow-up requests and gaps between work. This is an observable timeline, not a measured active-work total. The previous 30-minute estimate covered only the early core implementation/environment revision and must not be presented as the total for the expanded submission. Earlier planning and human review/submission time are not fully tracked; the candidate should include those when stating final approximate time spent against the assignment's 4–6 hour timebox.
 
-With another two hours, first review the transaction and replay paths against the tests, then add authenticated identity/admin guards, investigate compatible fixes for development dependency advisories, and measure SQLite contention and report memory usage. Next prioritize coordinated policy rollouts and a payment state machine only if those capabilities become required.
+With another two hours, first spend roughly 30 minutes reviewing transaction boundaries, failure injection, and durable replay after a response is lost. Then spend 30 minutes measuring writer contention and report memory on larger data, 45 minutes adding a minimal authenticated identity/admin boundary, and 15 minutes reviewing development dependency advisories and recording remaining risks. Policy rollout coordination and a real payment state machine would be separate follow-up work.
+
+## Verification and deliverable coverage
+
+- `npm test`: 33 focused tests cover validation, live price/stock changes, immutable orders, exact money and bounds, durable replay/reopening, customer-scoped keys, ownership and single redemption, historical policy migration, seed stability, report reconciliation, lock errors, product administration, and OpenAPI delivery.
+- Six tests use independent HTTP worker processes sharing a migrated SQLite file: product repricing versus checkout, identical keys, different keys on one cart, final-stock competition, competing coupon redemption, and competing admin recovery. A held writer lock coordinates the competing requests; this is stronger evidence than sequential calls in one event loop, but not a sustained load test.
+- A test-only injected exception after inventory, order/item insertion, and coupon redemption verifies full rollback. The hook is not exposed through HTTP.
+- `npm run typecheck` checks application and tests; `npm run test:smoke` builds and starts compiled JavaScript with a temporary database, repeats setup, checks documentation delivery, and executes the HTTP demo. Tests are under `src/tests/` and excluded from production compilation.
+- The Postman collection passed six isolated Newman runs (228 requests) across default rewards, a 100% discount policy, and a milestone above five, with repeat runs against existing orders. Newman is optional and not part of `npm test` or the application dependency tree.
+- [README.md](README.md) provides repeatable setup, migration, seed, evaluation, and run commands; [API.md](API.md), [OpenAPI](src/docs/openapi.json), Swagger UI, and [Postman](postman/README.md) document requests and execution. [ARCHITECTURE.md](ARCHITECTURE.md) contains architecture, ER, and flow diagrams.
+- Local history separates scaffold, persistence, business behavior, tests, and documentation, with follow-up policy and API additions. GitHub publishing is still a submission step; no public repository publication is claimed.
 
 ## Product administration extension
 

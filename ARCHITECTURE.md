@@ -177,6 +177,8 @@ flowchart TB
 
     subgraph AdminFlow["Administrator flow"]
         AdminStart([Admin operation]) --> Action{Choose operation}
+        Action -->|Manage products| Catalog["POST /api/admin/products<br/>PATCH /api/admin/products/:productId"]
+        Catalog --> CatalogResult["Validate decimal INR price and integer stock<br/>Create or update in an immediate transaction<br/>Return 201 created or 200 updated"]
         Action -->|Generate missing reward| Generate["POST /api/admin/coupons<br/>Acquire immediate transaction"]
         Generate --> Eligible{Historical milestone missing coupon?}
         Eligible -->|No| None["409 NO_ELIGIBLE_MILESTONE<br/>Normal after automatic issuance"]

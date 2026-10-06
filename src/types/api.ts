@@ -1,3 +1,9 @@
+export interface ProductInput {
+  name: string;
+  unitPrice: string;
+  inventory: number;
+}
+
 export interface CouponView {
   id: string;
   code: string;

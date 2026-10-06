@@ -127,7 +127,7 @@ Interactive API documentation is now served locally through Swagger UI at `/docs
 
 Implemented: durable SQLite persistence, committed migrations, repeatable setup/seed, customers, carts, live price/inventory validation, exact INR totals, immutable orders, durable checkout replay, atomic owned-coupon redemption, automatic milestone rewards, gated admin recovery, consistent reporting, validation/error contracts, separate-process races, rollback fault injection, compiled-service smoke evaluation, and API documentation.
 
-Deferred: authentication/authorization, product administration, inventory reservations, payments, cancellation/refunds, frontend, centrally coordinated policy versioning, coupon expiry/stacking/promotional issuance, pagination, distributed rate limiting, structured operational metrics, idempotency retention/cleanup, backups, and production deployment. The seven development dependency advisories remain documented; runtime audit reports zero at verification. Do not expose the authentication-free admin endpoints publicly as a production service.
+Deferred: authentication/authorization, inventory reservations, payments, cancellation/refunds, frontend, centrally coordinated policy versioning, coupon expiry/stacking/promotional issuance, pagination, distributed rate limiting, structured operational metrics, idempotency retention/cleanup, backups, and production deployment. The seven development dependency advisories remain documented; runtime audit reports zero at verification. Do not expose the authentication-free admin endpoints publicly as a production service.
 
 ## Multiple instances and production scale
 
@@ -150,3 +150,7 @@ A concrete generated-code correction: an early read-only report test compared a 
 Approximate AI-assisted implementation and verification time: 30 minutes, including the environment-policy revision and excluding earlier setup/planning and subsequent human review. Add actual human review and submission time before sending the assignment.
 
 With another two hours, first review the transaction and replay paths against the tests, then add authenticated identity/admin guards, investigate compatible fixes for development dependency advisories, and measure SQLite contention and report memory usage. Next prioritize coordinated policy rollouts and a payment state machine only if those capabilities become required.
+
+## Product administration extension
+
+Product creation and partial updates are implemented under `/api/admin/products`. Requests use decimal INR `unitPrice` and nonnegative integer stock, with generated immutable IDs. Updates preserve omitted fields and set absolute available inventory, rather than applying a delta. Immediate transactions serialize updates with checkout; a price-only update cannot overwrite a concurrent purchase's remaining stock. Live carts refresh price and availability, while orders retain immutable snapshots. Empty updates, unknown fields, malformed amounts, and missing products produce explicit client errors. Authentication remains deferred.

@@ -18,6 +18,8 @@ export function createRouter(
   });
   router.post("/customers", controller.createCustomer);
   router.get("/products", controller.products);
+  router.post("/admin/products", controller.createProduct);
+  router.patch("/admin/products/:productId", controller.updateProduct);
   router.post("/carts", controller.createCart);
   router.get("/carts/:cartId", controller.getCart);
   router.put("/carts/:cartId/items/:productId", controller.setItem);

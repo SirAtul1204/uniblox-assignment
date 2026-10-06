@@ -11,6 +11,18 @@ const keySchema = z
   .max(128)
   .regex(/^[\x21-\x7E]+$/);
 const emptyBody = z.object({}).strict();
+const productInput = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    unitPrice: z.string().min(1).max(32),
+    inventory: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+const productUpdate = productInput
+  .partial()
+  .refine((body) => Object.keys(body).length > 0, {
+    message: "Provide at least one product field to update",
+  });
 
 export class StoreController {
   constructor(private readonly service: StoreService) {}
@@ -23,6 +35,16 @@ export class StoreController {
   };
   products: RequestHandler = (_req, res) => {
     res.json(this.service.listProducts());
+  };
+  createProduct: RequestHandler = (req, res) => {
+    const body = productInput.parse(req.body);
+    const product = this.service.createProduct(body);
+    res.status(201).json(product);
+  };
+  updateProduct: RequestHandler = (req, res) => {
+    const { productId } = z.object({ productId: id }).parse(req.params);
+    const body = productUpdate.parse(req.body);
+    res.json(this.service.updateProduct(productId, body));
   };
   createCart: RequestHandler = (req, res) => {
     const body = z.object({ customerId: id }).strict().parse(req.body);

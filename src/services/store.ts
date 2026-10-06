@@ -12,10 +12,24 @@ import {
   products,
 } from "../db/schema";
 import { StoreRepository } from "../repositories/store";
-import type { CheckoutResponse, CouponView, OrderView } from "../types/api";
+import type {
+  CheckoutResponse,
+  CouponView,
+  OrderView,
+  ProductInput,
+} from "../types/api";
 import { env } from "../config/env";
 import { AppError } from "../utils/errors";
-import { calculateTotals, formatMoney, safeInteger } from "../utils/money";
+import {
+  calculateTotals,
+  formatMoney,
+  parseMoney,
+  safeInteger,
+} from "../utils/money";
+
+function productView({ priceMinor, ...row }: typeof products.$inferSelect) {
+  return { ...row, unitPrice: formatMoney(priceMinor), currency: "INR" };
+}
 
 function couponView(row: typeof coupons.$inferSelect): CouponView {
   return {
@@ -112,11 +126,40 @@ export class StoreService {
       .from(products)
       .orderBy(asc(products.id))
       .all()
-      .map(({ priceMinor, ...row }) => ({
-        ...row,
-        unitPrice: formatMoney(priceMinor),
-        currency: "INR",
-      }));
+      .map(productView);
+  }
+  createProduct(input: ProductInput) {
+    const row = {
+      id: randomUUID(),
+      name: input.name,
+      priceMinor: parseMoney(input.unitPrice),
+      inventory: input.inventory,
+    };
+    return this.db.transaction(
+      (tx) => {
+        tx.insert(products).values(row).run();
+        return productView(row);
+      },
+      { behavior: "immediate" },
+    );
+  }
+  updateProduct(id: string, input: Partial<ProductInput>) {
+    const changes = {
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.unitPrice === undefined
+        ? {}
+        : { priceMinor: parseMoney(input.unitPrice) }),
+      ...(input.inventory === undefined ? {} : { inventory: input.inventory }),
+    };
+    return this.db.transaction(
+      (tx) => {
+        const repo = new StoreRepository(tx);
+        repo.product(id);
+        tx.update(products).set(changes).where(eq(products.id, id)).run();
+        return productView(repo.product(id));
+      },
+      { behavior: "immediate" },
+    );
   }
   createCart(customerId: string) {
     return this.db.transaction(

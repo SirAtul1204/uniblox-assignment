@@ -11,6 +11,8 @@ test("OpenAPI document validates and covers every public API operation", async (
     "GET /health",
     "POST /customers",
     "GET /products",
+    "POST /admin/products",
+    "PATCH /admin/products/{productId}",
     "POST /carts",
     "GET /carts/{cartId}",
     "PUT /carts/{cartId}/items/{productId}",

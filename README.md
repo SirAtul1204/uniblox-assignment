@@ -68,6 +68,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the architecture diagram, entity rela
 - Milestones count successful orders across the store. The customer placing the milestone order gets a single-use coupon automatically, usable only on a later order belonging to that customer.
 - Admin coupon generation repairs an eligible milestone missing its coupon. Normally it returns `409 NO_ELIGIBLE_MILESTONE` because automatic issuance already generated the reward. It cannot create arbitrary promotional coupons.
 - Reports are read-only and derive revenue from immutable order snapshots, not current product prices.
+- Administrators can create products with `POST /api/admin/products` and partially update name, decimal `unitPrice`, or absolute `inventory` with `PATCH /api/admin/products/:productId`. Both operations are available in Swagger UI.
 - Authentication is deliberately excluded. Customer IDs are trusted inputs; ownership validation is a domain rule, not an authorization boundary. Routes under `/api/admin` are administrative.
 
 ## Commands and structure

@@ -11,6 +11,40 @@ interface Worker {
   child: ChildProcess;
   port: number;
 }
+
+test(
+  "competing product repricing and checkout preserve inventory and purchase snapshots",
+  { timeout: 30_000 },
+  async (t) => {
+    const f = fixture(t, { file: true });
+    const cart = populatedCart(f.service);
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
+      const responses = await race(f, workers, [
+        { route: `/carts/${cart.cartId}/checkout`, key: "repricing-race" },
+        {
+          method: "PATCH",
+          route: `/admin/products/${productId}`,
+          body: { unitPrice: "250.75" },
+        },
+      ]);
+      assert.equal(responses[0]!.status, 201);
+      assert.equal(responses[1]!.status, 200);
+      assert.ok(["200.34", "250.75"].includes(responses[0]!.body.order.total));
+      assert.deepEqual(
+        f.service.getOrder(responses[0]!.body.order.id),
+        responses[0]!.body.order,
+      );
+    });
+    const product = f.db
+      .select()
+      .from(products)
+      .where(eq(products.id, productId))
+      .get()!;
+    assert.equal(product.inventory, 99);
+    assert.equal(product.priceMinor, 25075);
+    assert.equal(f.service.report().totalOrders, 1);
+  },
+);
 function waitMessage(
   child: ChildProcess,
   type: string,
@@ -114,6 +148,7 @@ async function withWorkers(
   }
 }
 interface Attempt {
+  method?: "POST" | "PATCH";
   route: string;
   key?: string;
   body?: unknown;
@@ -132,7 +167,7 @@ async function race(
   const responses = workers.map((worker, index) => {
     const attempt = attempts[index]!;
     return fetch(`http://127.0.0.1:${worker.port}/api${attempt.route}`, {
-      method: "POST",
+      method: attempt.method ?? "POST",
       headers: {
         "Content-Type": "application/json",
         ...(attempt.key ? { "Idempotency-Key": attempt.key } : {}),

@@ -172,6 +172,35 @@ test("failed checkout leaves the key reusable after inventory is corrected", (t)
   );
 });
 
+test("the same idempotency key can be used independently by different customers", (t) => {
+  const f = fixture(t);
+  const first = populatedCart(f.service);
+  const second = populatedCart(f.service);
+  const a = f.service.checkout(first.cartId, "shared-client-key");
+  const b = f.service.checkout(second.cartId, "shared-client-key");
+  assert.notEqual(a.response.order.id, b.response.order.id);
+  assert.equal(a.replayed, false);
+  assert.equal(b.replayed, false);
+  assert.equal(f.service.report().totalOrders, 2);
+});
+
+test("report revenue stays exact when combined totals exceed the safe number range", (t) => {
+  const f = fixture(t);
+  f.db
+    .update(products)
+    .set({ priceMinor: Number.MAX_SAFE_INTEGER })
+    .where(eq(products.id, productId))
+    .run();
+  const first = populatedCart(f.service);
+  const second = populatedCart(f.service);
+  f.service.checkout(first.cartId, "large-first");
+  f.service.checkout(second.cartId, "large-second");
+  const report = f.service.report();
+  assert.equal(report.grossRevenue, "180143985094819.82");
+  assert.equal(report.netRevenue, "180143985094819.82");
+  assert.equal(report.totalDiscounts, "0.00");
+});
+
 test("store-wide milestones reward the milestone customer; coupons are owned and single-use", (t) => {
   const f = fixture(t, { policy: { everyN: 2, percent: 10 } });
   const a = populatedCart(f.service);

@@ -70,6 +70,13 @@ async function main() {
       }
     }
     assert.ok(ready, `Compiled server did not start: ${output}`);
+    const docs = await fetch(`http://127.0.0.1:${port}/docs/`);
+    assert.equal(docs.status, 200);
+    assert.match(await docs.text(), /swagger-ui-bundle\.js/);
+    const specResponse = await fetch(`http://127.0.0.1:${port}/openapi.json`);
+    assert.equal(specResponse.status, 200);
+    const spec = (await specResponse.json()) as { openapi: string };
+    assert.equal(spec.openapi, "3.0.3");
     await run(["dist/scripts/demo.js"], env);
     console.log("Compiled JavaScript smoke test passed.");
   } finally {

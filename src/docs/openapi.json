@@ -1,0 +1,1793 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Reliable Checkout and Customer Rewards API",
+    "version": "1.0.0",
+    "description": "Use **Try it out** and **Execute** below to call this running service. No API client installation or credentials are needed.\n\n### Quick walkthrough\n1. Create a customer and copy its returned id.\n2. List products; the seeded Notebook ID is already provided as an item-path example.\n3. Create a cart with your real customer ID and copy its returned id.\n4. Add an item using PUT and your real cart ID.\n5. Checkout with a unique Idempotency-Key and the default empty body.\n6. Execute the identical checkout again to verify durable replay, then retrieve its order.\n7. Inspect customer coupons and the admin report. Use an owned coupon code on a later cart to redeem it.\n\nExample UUIDs are placeholders: replace customer/cart/order IDs with values returned by your requests. Use a new checkout key for each new cart, retaining the same key and coupon on retries.\n\nMilestones use the environment policy, default n=5 and x=10. Every fifth store-wide order automatically earns a customer-specific coupon. Admin generation normally returns 409 because it only repairs missing historical rewards.\n\nPrices are exact decimal INR strings. Carts use live prices without reservations. Orders are immutable snapshots. Authentication is out of scope: customer IDs are trusted inputs and Administration operations are administrative."
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "This server; works with any host or port serving the docs."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Customers"
+    },
+    {
+      "name": "Products"
+    },
+    {
+      "name": "Carts"
+    },
+    {
+      "name": "Orders"
+    },
+    {
+      "name": "Rewards"
+    },
+    {
+      "name": "Administration",
+      "description": "Administrative operations; authentication is intentionally not implemented."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "operationId": "getHealth",
+        "summary": "Check service health",
+        "description": "Checks SQLite connectivity. Startup verifies schema readiness.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  }
+                },
+                "example": {
+                  "status": "ok"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/customers": {
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "operationId": "createCustomer",
+        "summary": "Create a customer",
+        "description": "Returns the customer ID to use when creating carts. Retrying creates another customer.",
+        "responses": {
+          "201": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/BodyTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomer"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "operationId": "listProducts",
+        "summary": "List products and inventory",
+        "description": "Returns all seeded products, including zero-stock items. Prices are current INR decimal strings.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                },
+                "example": [
+                  {
+                    "id": "00000000-0000-4000-8000-000000000001",
+                    "name": "Notebook",
+                    "inventory": 100,
+                    "unitPrice": "200.34",
+                    "currency": "INR"
+                  }
+                ]
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/carts": {
+      "post": {
+        "tags": [
+          "Carts"
+        ],
+        "operationId": "createCart",
+        "summary": "Create a customer-owned cart",
+        "description": "Use a real customer ID returned by Create a customer. The new cart is empty. Retrying creates another cart.",
+        "responses": {
+          "201": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                },
+                "example": {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "customerId": "11111111-1111-4111-8111-111111111111",
+                  "status": "open",
+                  "createdAt": "2026-10-06T14:00:00.000Z",
+                  "currency": "INR",
+                  "items": [],
+                  "subtotal": "0.00",
+                  "discount": "0.00",
+                  "total": "0.00",
+                  "orderId": null
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Customer does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CUSTOMER_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CUSTOMER_NOT_FOUND",
+                        "message": "Customer does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/BodyTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCart"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/carts/{cartId}": {
+      "get": {
+        "tags": [
+          "Carts"
+        ],
+        "operationId": "getCart",
+        "summary": "View a cart",
+        "description": "Shows live prices and current availability. Checked-out carts include orderId; retrieve that order for actual purchase snapshots.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Cart does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CART_NOT_FOUND",
+                        "message": "Cart does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CartId"
+          }
+        ]
+      }
+    },
+    "/carts/{cartId}/items/{productId}": {
+      "put": {
+        "tags": [
+          "Carts"
+        ],
+        "operationId": "setCartQuantity",
+        "summary": "Add an item or replace its quantity",
+        "description": "PUT sets an absolute positive integer quantity; it never increments it. Identical requests are repeatable. No inventory is reserved.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Cart or product does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CART_NOT_FOUND",
+                        "message": "Cart or product does not exist."
+                      }
+                    }
+                  },
+                  "PRODUCT_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "PRODUCT_NOT_FOUND",
+                        "message": "Cart or product does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cart is closed or current inventory is insufficient.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_ALREADY_CHECKED_OUT": {
+                    "value": {
+                      "error": {
+                        "code": "CART_ALREADY_CHECKED_OUT",
+                        "message": "Cart is closed or current inventory is insufficient."
+                      }
+                    }
+                  },
+                  "INSUFFICIENT_INVENTORY": {
+                    "value": {
+                      "error": {
+                        "code": "INSUFFICIENT_INVENTORY",
+                        "message": "Cart is closed or current inventory is insufficient."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/BodyTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CartId"
+          },
+          {
+            "$ref": "#/components/parameters/ProductId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetQuantity"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Carts"
+        ],
+        "operationId": "removeCartItem",
+        "summary": "Remove a cart item",
+        "description": "Removing an already absent item is a no-op. A valid but unknown product UUID is treated as an absent item.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Cart does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CART_NOT_FOUND",
+                        "message": "Cart does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cart is already checked out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_ALREADY_CHECKED_OUT": {
+                    "value": {
+                      "error": {
+                        "code": "CART_ALREADY_CHECKED_OUT",
+                        "message": "Cart is already checked out."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CartId"
+          },
+          {
+            "$ref": "#/components/parameters/ProductId"
+          }
+        ]
+      }
+    },
+    "/carts/{cartId}/checkout": {
+      "post": {
+        "tags": [
+          "Orders"
+        ],
+        "operationId": "checkoutCart",
+        "summary": "Checkout a cart with optional coupon",
+        "description": "Use a unique key for this customer/cart. Same key, cart and coupon replay the original successful response even after restart. Changed cart/coupon inputs conflict. Failed attempts leave the key reusable. Inventory, order, redemption, reward and replay storage commit together or all roll back. A coupon is usable only by its owner and cannot discount its earning order.",
+        "responses": {
+          "201": {
+            "description": "Created order, or original successful response on replay. earnedCoupon is null except on milestone orders.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Checkout"
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "Present with value true only when replaying a successful checkout.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Cart does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CART_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CART_NOT_FOUND",
+                        "message": "Cart does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cart state, inventory, or idempotency conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "EMPTY_CART": {
+                    "value": {
+                      "error": {
+                        "code": "EMPTY_CART",
+                        "message": "Cart state, inventory, or idempotency conflict."
+                      }
+                    }
+                  },
+                  "CART_ALREADY_CHECKED_OUT": {
+                    "value": {
+                      "error": {
+                        "code": "CART_ALREADY_CHECKED_OUT",
+                        "message": "Cart state, inventory, or idempotency conflict."
+                      }
+                    }
+                  },
+                  "INSUFFICIENT_INVENTORY": {
+                    "value": {
+                      "error": {
+                        "code": "INSUFFICIENT_INVENTORY",
+                        "message": "Cart state, inventory, or idempotency conflict."
+                      }
+                    }
+                  },
+                  "IDEMPOTENCY_CONFLICT": {
+                    "value": {
+                      "error": {
+                        "code": "IDEMPOTENCY_CONFLICT",
+                        "message": "Cart state, inventory, or idempotency conflict."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/BodyTooLarge"
+          },
+          "422": {
+            "description": "Coupon is invalid, belongs to another customer, or was already redeemed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "COUPON_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "COUPON_NOT_FOUND",
+                        "message": "Coupon is invalid, belongs to another customer, or was already redeemed."
+                      }
+                    }
+                  },
+                  "COUPON_CUSTOMER_MISMATCH": {
+                    "value": {
+                      "error": {
+                        "code": "COUPON_CUSTOMER_MISMATCH",
+                        "message": "Coupon is invalid, belongs to another customer, or was already redeemed."
+                      }
+                    }
+                  },
+                  "COUPON_ALREADY_REDEEMED": {
+                    "value": {
+                      "error": {
+                        "code": "COUPON_ALREADY_REDEEMED",
+                        "message": "Coupon is invalid, belongs to another customer, or was already redeemed."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CartId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutInput"
+              },
+              "examples": {
+                "withoutCoupon": {
+                  "summary": "Checkout without a coupon",
+                  "value": {}
+                },
+                "withCoupon": {
+                  "summary": "Use a real owned coupon code from the coupon list",
+                  "value": {
+                    "couponCode": "83e29be224b770901bedcb6b152c3cd4"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderId}": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "operationId": "getOrder",
+        "summary": "Retrieve an immutable order",
+        "description": "Product names, prices and totals reflect purchase time even if the catalog changes.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Order does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "ORDER_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "ORDER_NOT_FOUND",
+                        "message": "Order does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ]
+      }
+    },
+    "/customers/{customerId}/coupons": {
+      "get": {
+        "tags": [
+          "Rewards"
+        ],
+        "operationId": "listCustomerCoupons",
+        "summary": "List a customer’s coupons",
+        "description": "Includes available and redeemed coupons with current status. Copy an available code to a later cart checkout belonging to the same customer.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Coupon"
+                  }
+                },
+                "example": [
+                  {
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "code": "83e29be224b770901bedcb6b152c3cd4",
+                    "customerId": "11111111-1111-4111-8111-111111111111",
+                    "milestoneOrderId": "55555555-5555-4555-8555-555555555555",
+                    "discountPercent": 10,
+                    "status": "available",
+                    "redeemedOrderId": null,
+                    "createdAt": "2026-10-06T14:00:00.000Z"
+                  }
+                ]
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Customer does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "CUSTOMER_NOT_FOUND": {
+                    "value": {
+                      "error": {
+                        "code": "CUSTOMER_NOT_FOUND",
+                        "message": "Customer does not exist."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CustomerId"
+          }
+        ]
+      }
+    },
+    "/admin/coupons": {
+      "post": {
+        "tags": [
+          "Administration"
+        ],
+        "operationId": "generateMissingCoupon",
+        "summary": "Generate a missing milestone coupon",
+        "description": "Recovery only: creates one coupon for the oldest historical milestone missing its reward. Uses the order’s owner and historical n/x snapshots. Normally returns 409 after automatic issuance. Arbitrary codes, owners and percentages cannot be supplied.",
+        "responses": {
+          "201": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Coupon"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "No eligible unrewarded milestone exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "NO_ELIGIBLE_MILESTONE": {
+                    "value": {
+                      "error": {
+                        "code": "NO_ELIGIBLE_MILESTONE",
+                        "message": "No eligible unrewarded milestone exists."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/BodyTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DatabaseBusy"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              },
+              "examples": {
+                "empty": {
+                  "value": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/report": {
+      "get": {
+        "tags": [
+          "Administration"
+        ],
+        "operationId": "getReport",
+        "summary": "View reconciled revenue and reward report",
+        "description": "Read-only consistent snapshot. Revenue derives from immutable orders, quantities from order items, and coupon counts reconcile with records. Includes zero-purchase products; labels are current catalog names. No pagination.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                },
+                "example": {
+                  "currency": "INR",
+                  "purchasedQuantityByProduct": [
+                    {
+                      "productId": "00000000-0000-4000-8000-000000000001",
+                      "name": "Notebook",
+                      "quantity": 6
+                    },
+                    {
+                      "productId": "00000000-0000-4000-8000-000000000002",
+                      "name": "Pen",
+                      "quantity": 0
+                    },
+                    {
+                      "productId": "00000000-0000-4000-8000-000000000003",
+                      "name": "Coffee Mug",
+                      "quantity": 0
+                    },
+                    {
+                      "productId": "00000000-0000-4000-8000-000000000004",
+                      "name": "Backpack",
+                      "quantity": 0
+                    },
+                    {
+                      "productId": "00000000-0000-4000-8000-000000000005",
+                      "name": "Limited Edition Print",
+                      "quantity": 0
+                    }
+                  ],
+                  "grossRevenue": "1202.04",
+                  "totalDiscounts": "20.03",
+                  "netRevenue": "1182.01",
+                  "totalOrders": 6,
+                  "coupons": {
+                    "generated": 1,
+                    "available": 0,
+                    "redeemed": 1,
+                    "records": [
+                      {
+                        "id": "44444444-4444-4444-8444-444444444444",
+                        "code": "83e29be224b770901bedcb6b152c3cd4",
+                        "customerId": "11111111-1111-4111-8111-111111111111",
+                        "milestoneOrderId": "55555555-5555-4555-8555-555555555555",
+                        "discountPercent": 10,
+                        "status": "redeemed",
+                        "redeemedOrderId": "33333333-3333-4333-8333-333333333333",
+                        "createdAt": "2026-10-06T14:00:00.000Z"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Money": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2}$",
+        "description": "Exact INR decimal string with two fractional digits; never a floating-point JSON number.",
+        "example": "200.34"
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "INSUFFICIENT_INVENTORY"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "description": "Optional domain details or array of validation issues; shape depends on error code."
+              }
+            }
+          }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "name": "Asha",
+          "createdAt": "2026-10-06T14:00:00.000Z"
+        }
+      },
+      "Product": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "inventory",
+          "unitPrice",
+          "currency"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "inventory": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unitPrice": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "INR"
+            ]
+          }
+        },
+        "example": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Notebook",
+          "inventory": 100,
+          "unitPrice": "200.34",
+          "currency": "INR"
+        }
+      },
+      "CartItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "name",
+          "quantity",
+          "unitPrice",
+          "lineTotal",
+          "availableInventory",
+          "available"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "unitPrice": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lineTotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "availableInventory": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Cart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "customerId",
+          "status",
+          "createdAt",
+          "currency",
+          "items",
+          "subtotal",
+          "discount",
+          "total",
+          "orderId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "checked_out"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "INR"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItem"
+            }
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "example": {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "customerId": "11111111-1111-4111-8111-111111111111",
+          "status": "open",
+          "createdAt": "2026-10-06T14:00:00.000Z",
+          "currency": "INR",
+          "items": [
+            {
+              "productId": "00000000-0000-4000-8000-000000000001",
+              "name": "Notebook",
+              "quantity": 1,
+              "unitPrice": "200.34",
+              "lineTotal": "200.34",
+              "availableInventory": 100,
+              "available": true
+            }
+          ],
+          "subtotal": "200.34",
+          "discount": "0.00",
+          "total": "200.34",
+          "orderId": null
+        }
+      },
+      "OrderItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "name",
+          "quantity",
+          "unitPrice",
+          "lineTotal"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "unitPrice": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lineTotal": {
+            "$ref": "#/components/schemas/Money"
+          }
+        }
+      },
+      "AppliedCoupon": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "discountPercent"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "discountPercent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "cartId",
+          "customerId",
+          "ordinal",
+          "currency",
+          "createdAt",
+          "items",
+          "subtotal",
+          "discount",
+          "total",
+          "appliedCoupon"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cartId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "INR"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            },
+            "minItems": 1
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "appliedCoupon": {
+            "$ref": "#/components/schemas/NullableAppliedCoupon"
+          }
+        },
+        "example": {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "cartId": "22222222-2222-4222-8222-222222222222",
+          "customerId": "11111111-1111-4111-8111-111111111111",
+          "ordinal": 1,
+          "currency": "INR",
+          "createdAt": "2026-10-06T14:00:00.000Z",
+          "items": [
+            {
+              "productId": "00000000-0000-4000-8000-000000000001",
+              "name": "Notebook",
+              "quantity": 1,
+              "unitPrice": "200.34",
+              "lineTotal": "200.34"
+            }
+          ],
+          "subtotal": "200.34",
+          "discount": "0.00",
+          "total": "200.34",
+          "appliedCoupon": null
+        }
+      },
+      "Coupon": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "code",
+          "customerId",
+          "milestoneOrderId",
+          "discountPercent",
+          "status",
+          "redeemedOrderId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "milestoneOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "discountPercent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "redeemed"
+            ]
+          },
+          "redeemedOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "code": "83e29be224b770901bedcb6b152c3cd4",
+          "customerId": "11111111-1111-4111-8111-111111111111",
+          "milestoneOrderId": "55555555-5555-4555-8555-555555555555",
+          "discountPercent": 10,
+          "status": "available",
+          "redeemedOrderId": null,
+          "createdAt": "2026-10-06T14:00:00.000Z"
+        }
+      },
+      "Checkout": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "order",
+          "earnedCoupon"
+        ],
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "earnedCoupon": {
+            "$ref": "#/components/schemas/NullableCoupon"
+          }
+        },
+        "example": {
+          "order": {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "cartId": "22222222-2222-4222-8222-222222222222",
+            "customerId": "11111111-1111-4111-8111-111111111111",
+            "ordinal": 1,
+            "currency": "INR",
+            "createdAt": "2026-10-06T14:00:00.000Z",
+            "items": [
+              {
+                "productId": "00000000-0000-4000-8000-000000000001",
+                "name": "Notebook",
+                "quantity": 1,
+                "unitPrice": "200.34",
+                "lineTotal": "200.34"
+              }
+            ],
+            "subtotal": "200.34",
+            "discount": "0.00",
+            "total": "200.34",
+            "appliedCoupon": null
+          },
+          "earnedCoupon": null
+        }
+      },
+      "PurchasedQuantity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "name",
+          "quantity"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "Report": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currency",
+          "purchasedQuantityByProduct",
+          "grossRevenue",
+          "totalDiscounts",
+          "netRevenue",
+          "totalOrders",
+          "coupons"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "INR"
+            ]
+          },
+          "purchasedQuantityByProduct": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchasedQuantity"
+            }
+          },
+          "grossRevenue": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "totalDiscounts": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "netRevenue": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "totalOrders": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "coupons": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "generated",
+              "available",
+              "redeemed",
+              "records"
+            ],
+            "properties": {
+              "generated": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "available": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "redeemed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "records": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Coupon"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateCustomer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Trimmed before validating length."
+          }
+        },
+        "example": {
+          "name": "Asha"
+        }
+      },
+      "CreateCart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "example": {
+          "customerId": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "SetQuantity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "quantity"
+        ],
+        "properties": {
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "example": {
+          "quantity": 1
+        }
+      },
+      "CheckoutInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "couponCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Optional case-sensitive code belonging to the cart customer."
+          }
+        }
+      },
+      "EmptyObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "NullableCoupon": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "code",
+          "customerId",
+          "milestoneOrderId",
+          "discountPercent",
+          "status",
+          "redeemedOrderId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "milestoneOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "discountPercent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "redeemed"
+            ]
+          },
+          "redeemedOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": null,
+        "nullable": true
+      },
+      "NullableAppliedCoupon": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "discountPercent"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "discountPercent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "nullable": true,
+        "example": null
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed UUID, body, key, or unsupported numeric range.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "VALIDATION_ERROR": {
+                "value": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Malformed UUID, body, key, or unsupported numeric range."
+                  }
+                }
+              },
+              "INVALID_JSON": {
+                "value": {
+                  "error": {
+                    "code": "INVALID_JSON",
+                    "message": "Malformed UUID, body, key, or unsupported numeric range."
+                  }
+                }
+              },
+              "AMOUNT_OUT_OF_RANGE": {
+                "value": {
+                  "error": {
+                    "code": "AMOUNT_OUT_OF_RANGE",
+                    "message": "Malformed UUID, body, key, or unsupported numeric range."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Unexpected failure; logged server-side with sanitized public details.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "INTERNAL_ERROR": {
+                "value": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "Unexpected failure; logged server-side with sanitized public details."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "BodyTooLarge": {
+        "description": "JSON request body exceeds 16kb.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "BODY_TOO_LARGE": {
+                "value": {
+                  "error": {
+                    "code": "BODY_TOO_LARGE",
+                    "message": "JSON request body exceeds 16kb."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "DatabaseBusy": {
+        "description": "Database write-lock timeout. Retry; for checkout keep the same idempotency key.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "DATABASE_BUSY": {
+                "value": {
+                  "error": {
+                    "code": "DATABASE_BUSY",
+                    "message": "Database write-lock timeout. Retry; for checkout keep the same idempotency key."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "headers": {
+          "Retry-After": {
+            "description": "Suggested delay in seconds.",
+            "schema": {
+              "type": "string",
+              "example": "1"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "CartId": {
+        "name": "cartId",
+        "in": "path",
+        "required": true,
+        "description": "Replace with a cart ID returned by Create a cart.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "22222222-2222-4222-8222-222222222222"
+        }
+      },
+      "ProductId": {
+        "name": "productId",
+        "in": "path",
+        "required": true,
+        "description": "Seeded Notebook ID, or another ID returned by List products.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "00000000-0000-4000-8000-000000000001"
+        }
+      },
+      "OrderId": {
+        "name": "orderId",
+        "in": "path",
+        "required": true,
+        "description": "Replace with an order ID returned by Checkout.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "33333333-3333-4333-8333-333333333333"
+        }
+      },
+      "CustomerId": {
+        "name": "customerId",
+        "in": "path",
+        "required": true,
+        "description": "Replace with a customer ID returned by Create a customer.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "1–128 printable ASCII characters without whitespace. New key per cart; identical key and coupon on retry. Scoped to customer.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\x21-\\x7E]+$",
+          "example": "checkout-001"
+        }
+      }
+    }
+  }
+}

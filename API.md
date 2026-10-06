@@ -2,6 +2,8 @@
 
 Base URL: `http://localhost:3000/api`. Use `Content-Type: application/json` for bodies. All resource IDs are UUIDs, timestamps are UTC ISO strings, and monetary values are INR strings with exactly two fractional digits. Unknown body fields are rejected. Request bodies are limited to 16kb.
 
+Interactive documentation: **[Swagger UI](http://localhost:3000/docs/)**. Portable contract: [OpenAPI document](src/docs/openapi.json), also served at **`GET /openapi.json`**. These documentation endpoints are outside the `/api` prefix and do not modify the database.
+
 No authentication is implemented. Customer IDs are supplied by the caller. `/admin/*` operations are explicitly administrative.
 
 ## Shared representations

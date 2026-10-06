@@ -35,6 +35,12 @@ npm start
 
 ## Evaluate
 
+Open **[Swagger UI](http://localhost:3000/docs/)** after starting the service. Expand an endpoint and click **Try it out → Execute** to send requests directly from the browser. No Postman, account, or API-client installation is required. The UI uses the same server host and port automatically; if you change `PORT`, open `/docs/` on that port.
+
+The UI includes a walkthrough: create a customer, copy its ID into cart creation, copy the cart ID into item and checkout requests, then retry checkout with the same key. Example customer/cart/order UUIDs are placeholders; replace them with IDs returned by your requests. The seeded Notebook product ID is ready to use. Use a new idempotency key for each new cart. To exercise rewards, place enough orders to reach the configured store-wide milestone and use the earned code on a later owned cart.
+
+The portable **OpenAPI 3.0.3** document is available at [src/docs/openapi.json](src/docs/openapi.json) and through **[GET /openapi.json](http://localhost:3000/openapi.json)**. It can also be imported into API clients. The UI's assets are served locally, and it does not send the specification to an external validator.
+
 While the server is running:
 
 ```sh

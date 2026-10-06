@@ -14,6 +14,7 @@ const app = createApp(context);
 
 const server = app.listen(env.port, () => {
   console.log(`Server listening on http://localhost:${env.port}`);
+  console.log(`Swagger UI: http://localhost:${env.port}/docs/`);
 });
 
 server.on("error", (error) => {

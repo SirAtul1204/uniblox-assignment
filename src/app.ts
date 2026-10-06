@@ -1,4 +1,6 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
+import openapiDocument from "./docs/openapi.json";
 import { createErrorHandler } from "./middlewares/error-handler";
 import { createRouter } from "./routes";
 import type { DatabaseContext, RewardPolicy } from "./db";
@@ -15,6 +17,24 @@ export function createApp(
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "16kb" }));
+  app.get("/openapi.json", (_req, res) => {
+    res.json(openapiDocument);
+  });
+  app.use(
+    "/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(undefined, {
+      customSiteTitle: "Checkout and Rewards API",
+      customCss: ".swagger-ui .topbar { display: none; }",
+      swaggerOptions: {
+        url: "/openapi.json",
+        validatorUrl: null,
+        tryItOutEnabled: true,
+        displayRequestDuration: true,
+        docExpansion: "list",
+      },
+    }),
+  );
   app.use("/api", createRouter(context, options.rewardPolicy, options.hooks));
   app.use((_req, res) => {
     res

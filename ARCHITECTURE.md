@@ -12,7 +12,8 @@ flowchart TB
 
     subgraph Backend["Node.js + Express + TypeScript"]
         Server["Server startup<br/>Validate environment and schema readiness"]
-        Routes["Express app and routes<br/>JSON parsing, /api endpoints"]
+        Routes["Express app and routes<br/>JSON parsing, API and docs endpoints"]
+        Swagger["Swagger UI /docs/<br/>OpenAPI document /openapi.json"]
         Controller["Controllers + Zod<br/>Validate request bodies, IDs and keys"]
         Service["Store service<br/>Business rules and transaction boundaries"]
         Money["Money utilities<br/>Decimal INR strings ↔ integer paise<br/>Exact BigInt calculations"]
@@ -31,6 +32,7 @@ flowchart TB
     Server --> Routes
     Server -->|Check schema| ORM
     Routes --> Controller
+    Routes -->|Documentation and browser requests| Swagger
     Controller --> Service
     Service --> Money
     Service --> Repository

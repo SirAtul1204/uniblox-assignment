@@ -41,6 +41,8 @@ The UI includes a walkthrough: create a customer, copy its ID into cart creation
 
 The portable **OpenAPI 3.0.3** document is available at [src/docs/openapi.json](src/docs/openapi.json) and through **[GET /openapi.json](http://localhost:3000/openapi.json)**. It can also be imported into API clients. The UI's assets are served locally, and it does not send the specification to an external validator.
 
+For an automated customer-to-report walkthrough, import the [Postman collection](postman/checkout-rewards.postman_collection.json) and run all requests in order with one iteration. IDs and checkout keys are captured automatically. It covers product setup, cart edits, checkout and replay, five-order reward issuance, coupon redemption, and report reconciliation. Each run creates a dedicated customer/product and six orders. See the [Postman guide](postman/README.md) for setup, policy behavior, expected errors, and Newman commands.
+
 While the server is running:
 
 ```sh

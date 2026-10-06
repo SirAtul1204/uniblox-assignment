@@ -1,0 +1,1584 @@
+{
+  "info": {
+    "name": "Checkout and Rewards — Complete Customer Walkthrough",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run all folders in order with Collection Runner, one iteration. Creates a customer, dedicated product, six successful orders and a coupon redemption under the default n=5 policy. IDs and keys are captured automatically. Includes an expected empty-cart 409, exact replay, admin recovery 409 and read-only report reconciliation. Existing orders are accounted for by a baseline; use a server with no concurrent writers and no manually deleted milestone coupons. Policies with n>5 may not earn a coupon in this run; sixth checkout then proceeds without one. Each run changes database state. No authentication is configured."
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Customer and product setup",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/health"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Healthy', () => pm.expect(payload.status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create customer and initialize this run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customers",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman checkout customer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of ['gross','discounts','net','runOrders','runGenerated','runRedeemed']) pm.collectionVariables.set(key, '0');",
+                  "for (const key of ['couponCode','couponPercent']) pm.collectionVariables.unset(key);",
+                  "pm.collectionVariables.set('firstCheckoutKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "pm.collectionVariables.set('redemptionKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('customerId', payload.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture report baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/report"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('baseline', JSON.stringify(payload));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a dedicated stocked product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman demo {{$guid}}\",\n  \"unitPrice\": \"199.99\",\n  \"inventory\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('productId', payload.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update product price",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/products/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unitPrice\": \"200.34\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Updated price and preserved inventory', () => { pm.expect(payload.unitPrice).to.eql('200.34'); pm.expect(payload.inventory).to.eql(20); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/products"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('New product is listed', () => pm.expect(payload.some(p => p.id === pm.collectionVariables.get('productId'))).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Cart editing, checkout and replay",
+      "item": [
+        {
+          "name": "Create first cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('cartId', payload.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add two units",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Two units', () => pm.expect(payload.subtotal).to.eql('400.68'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace quantity with one",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Quantity replaced', () => pm.expect(payload.items[0].quantity).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove item",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/{{productId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Empty cart', () => pm.expect(payload.items).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty checkout fails without retaining its key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{firstCheckoutKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Empty checkout rejected', () => pm.expect(payload.error.code).to.eql('EMPTY_CART'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Restore one unit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read live cart",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Open cart at current price', () => { pm.expect(payload.status).to.eql('open'); pm.expect(payload.total).to.eql('200.34'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Checkout first order using the previously failed key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{firstCheckoutKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}",
+                  "pm.collectionVariables.set('orderId', payload.order.id);",
+                  "pm.collectionVariables.set('firstResponse', JSON.stringify(payload));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replay checkout with identical key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{firstCheckoutKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Original response replayed exactly', () => { pm.expect(pm.response.headers.get('Idempotency-Replayed')).to.eql('true'); pm.expect(payload).to.deep.eql(JSON.parse(pm.collectionVariables.get('firstResponse'))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get immutable first order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Stored order matches checkout', () => pm.expect(payload).to.deep.eql(JSON.parse(pm.collectionVariables.get('firstResponse')).order));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read completed cart",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{cartId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Cart is closed with order ID', () => { pm.expect(payload.status).to.eql('checked_out'); pm.expect(payload.orderId).to.eql(pm.collectionVariables.get('orderId')); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Reach a reward milestone (five orders total)",
+      "item": [
+        {
+          "name": "Order 2: create cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('rewardCartId', payload.id);",
+                  "pm.collectionVariables.set('rewardKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 2: add one unit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 2: checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rewardKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 3: create cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('rewardCartId', payload.id);",
+                  "pm.collectionVariables.set('rewardKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 3: add one unit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 3: checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rewardKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 4: create cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('rewardCartId', payload.id);",
+                  "pm.collectionVariables.set('rewardKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 4: add one unit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 4: checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rewardKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 5: create cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('rewardCartId', payload.id);",
+                  "pm.collectionVariables.set('rewardKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 5: add one unit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order 5: checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rewardKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{rewardCartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Redeem reward and reconcile report",
+      "item": [
+        {
+          "name": "List customer rewards",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customers/{{customerId}}/coupons"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "const code = pm.collectionVariables.get('couponCode'); pm.test('Generated reward is available when milestone reached', () => { if(code) pm.expect(payload.some(c => c.code === code && c.status === 'available')).to.eql(true); else console.info('No milestone reached under the configured policy; sixth checkout will have no coupon.'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create redemption cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('redemptionCartId', payload.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add one unit for redemption",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{redemptionCartId}}/items/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Checkout sixth order with earned coupon when available",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{redemptionKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/carts/{{redemptionCartId}}/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{{redemptionBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const code = pm.collectionVariables.get('couponCode') || '';",
+                  "pm.collectionVariables.set('redemptionCode', code);",
+                  "pm.collectionVariables.set('redemptionPercent', pm.collectionVariables.get('couponPercent') || '0');",
+                  "pm.collectionVariables.set('redemptionBody', JSON.stringify(code ? {couponCode:code} : {}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "const code = pm.collectionVariables.get('redemptionCode');",
+                  "pm.test('Exact coupon discount', () => {",
+                  " const expected = code ? 20034n * BigInt(pm.collectionVariables.get('redemptionPercent')) / 100n : 0n;",
+                  " pm.expect(BigInt(payload.order.discount.replace('.', ''))).to.eql(expected);",
+                  " if(code) pm.expect(payload.order.appliedCoupon.code).to.eql(code); else pm.expect(payload.order.appliedCoupon).to.eql(null);",
+                  "});",
+                  "if(code) pm.collectionVariables.set('runRedeemed', '1');",
+                  "",
+                  "pm.test('Owned immutable order with INR amounts', () => {",
+                  " pm.expect(payload.order.customerId).to.eql(pm.collectionVariables.get('customerId'));",
+                  " pm.expect(payload.order.currency).to.eql('INR');",
+                  " for (const field of ['subtotal','discount','total']) pm.expect(payload.order[field]).to.match(/^\\d+\\.\\d{2}$/);",
+                  " pm.expect(payload.order.subtotal).to.eql('200.34');",
+                  "});",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "for (const [key, field] of [['gross','subtotal'],['discounts','discount'],['net','total']]) {",
+                  " pm.collectionVariables.set(key, (BigInt(pm.collectionVariables.get(key) || '0') + minor(payload.order[field])).toString());",
+                  "}",
+                  "pm.collectionVariables.set('runOrders', Number(pm.collectionVariables.get('runOrders') || 0) + 1);",
+                  "if(payload.earnedCoupon) {",
+                  " pm.test('Earned coupon belongs to this customer', () => pm.expect(payload.earnedCoupon.customerId).to.eql(pm.collectionVariables.get('customerId')));",
+                  " pm.collectionVariables.set('couponCode', payload.earnedCoupon.code);",
+                  " pm.collectionVariables.set('couponPercent', payload.earnedCoupon.discountPercent);",
+                  " pm.collectionVariables.set('runGenerated', Number(pm.collectionVariables.get('runGenerated') || 0) + 1);",
+                  "}",
+                  "pm.collectionVariables.set('redemptionOrderId', payload.order.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read redeemed coupon status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/customers/{{customerId}}/coupons"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "const code = pm.collectionVariables.get('redemptionCode'); pm.test('Coupon redemption is linked to sixth order', () => { if(code) { const coupon = payload.find(c => c.code === code); pm.expect(coupon.status).to.eql('redeemed'); pm.expect(coupon.redeemedOrderId).to.eql(pm.collectionVariables.get('redemptionOrderId')); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin recovery normally has no eligible milestone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/coupons",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Automatic issuance leaves no backlog', () => pm.expect(payload.error.code).to.eql('NO_ELIGIBLE_MILESTONE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reconcile final report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/report"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "",
+                  "const baseline = JSON.parse(pm.collectionVariables.get('baseline'));",
+                  "const minor = value => BigInt(value.replace('.', ''));",
+                  "pm.test('Exactly six successful orders; retry did not count', () => pm.expect(payload.totalOrders).to.eql(baseline.totalOrders + 6));",
+                  "pm.test('Revenue reconciles with immutable orders', () => {",
+                  " for(const [field,key] of [['grossRevenue','gross'],['totalDiscounts','discounts'],['netRevenue','net']]) pm.expect(minor(payload[field])).to.eql(minor(baseline[field]) + BigInt(pm.collectionVariables.get(key)));",
+                  " pm.expect(minor(payload.grossRevenue) - minor(payload.totalDiscounts)).to.eql(minor(payload.netRevenue));",
+                  "});",
+                  "pm.test('Purchased quantity and coupon counts reconcile', () => {",
+                  " pm.expect(payload.purchasedQuantityByProduct.find(p => p.productId === pm.collectionVariables.get('productId')).quantity).to.eql(6);",
+                  " pm.expect(payload.coupons.generated).to.eql(baseline.coupons.generated + Number(pm.collectionVariables.get('runGenerated')));",
+                  " pm.expect(payload.coupons.redeemed).to.eql(baseline.coupons.redeemed + Number(pm.collectionVariables.get('runRedeemed')));",
+                  " pm.expect(payload.coupons.available).to.eql(payload.coupons.generated - payload.coupons.redeemed);",
+                  "});",
+                  "pm.collectionVariables.set('finalReport', JSON.stringify(payload));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat report without mutation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/admin/report"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Read-only report is stable', () => pm.expect(payload).to.deep.eql(JSON.parse(pm.collectionVariables.get('finalReport'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify inventory decreased only for successful purchases",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/products"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test('Exactly six units consumed', () => pm.expect(payload.find(p => p.id === pm.collectionVariables.get('productId')).inventory).to.eql(14));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

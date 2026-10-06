@@ -154,3 +154,9 @@ With another two hours, first review the transaction and replay paths against th
 ## Product administration extension
 
 Product creation and partial updates are implemented under `/api/admin/products`. Requests use decimal INR `unitPrice` and nonnegative integer stock, with generated immutable IDs. Updates preserve omitted fields and set absolute available inventory, rather than applying a delta. Immediate transactions serialize updates with checkout; a price-only update cannot overwrite a concurrent purchase's remaining stock. Live carts refresh price and availability, while orders retain immutable snapshots. Empty updates, unknown fields, malformed amounts, and missing products produce explicit client errors. Authentication remains deferred.
+
+## Postman evaluation walkthrough
+
+The Postman v2.1 collection supplements OpenAPI with ordered executable requests and automatic variable capture. Each run creates its own customer and stocked product, places six orders, and compares the final report against a captured baseline. Five initial orders guarantee an owned reward under the default policy; custom policies above five may leave the sixth purchase undiscounted. Expected empty-cart and admin-recovery errors are asserted explicitly. Exact report reconciliation assumes no concurrent writers or manually removed milestone coupons.
+
+Newman verification uses isolated databases and repeat runs with default rewards, 100% discounts, and a milestone above five. Newman was installed outside the repository for verification rather than added to application dependencies. An actual correction from sandbox execution: naming the response variable `data` conflicts with Postman's existing global; scripts now use `payload`.

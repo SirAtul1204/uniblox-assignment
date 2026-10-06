@@ -1,20 +1,27 @@
-# Express + TypeScript + SQLite
+# Reliable Checkout and Customer Rewards
 
-Requires Node.js 22.12+ and npm. All TypeScript source and database tooling configuration live in `src/`. JavaScript output goes to `dist/`.
+Express 5 + TypeScript + Drizzle ORM + SQLite (`better-sqlite3`). Checkout atomically updates inventory, redeems a coupon, stores an immutable order, closes its cart, generates a milestone reward, and persists the replay response.
 
-## Getting started
+## Setup and run
 
-```sh
-npm install
-```
-
-Optionally copy `.env.example` to `.env` and change the port or database path. Defaults work without an `.env` file.
+Requires Node.js **22.12+** and npm. Run commands from the repository root. No private services, credentials, or external database are required.
 
 ```sh
+npm ci
+npm run db:setup
 npm run dev
 ```
 
-Nodemon restarts the server when source changes; tsx executes TypeScript during development. Run `npm run typecheck` separately to check types.
+Optionally copy `.env.example` to `.env` before setup:
+
+| Setting                   | Default             | Meaning                                                                |
+| ------------------------- | ------------------- | ---------------------------------------------------------------------- |
+| `PORT`                    | `3000`              | HTTP port                                                              |
+| `DATABASE_PATH`           | `./data/app.sqlite` | SQLite file; parent directories are created automatically              |
+| `REWARD_EVERY_N_ORDERS`   | `5`                 | Positive integer: every nth successful store-wide order earns a reward |
+| `REWARD_DISCOUNT_PERCENT` | `10`                | Integer percentage from 1 to 100                                       |
+
+The reward policy is fixed when the database is initialized. Changing n/x later fails explicitly; restore the original settings or use a new database path. Product seeding is idempotent and never restocks or reprices existing products. Startup requires setup and reports an actionable error if it is missing.
 
 ```sh
 npm run typecheck
@@ -22,41 +29,74 @@ npm run build
 npm start
 ```
 
-`npm start` runs compiled JavaScript only. `npm run build:start` compiles and starts in one command. The health endpoint is `GET http://localhost:3000/api/health`; it checks SQLite connectivity.
+`npm start` runs **compiled JavaScript** from `dist/`. `npm run build:start` builds and starts in one command. Keep the repository's `migrations/` directory alongside the compiled application when deploying.
 
-## Structure
+## Evaluate
+
+While the server is running:
+
+```sh
+npm run demo
+```
+
+The demo creates a customer and cart, purchases one seeded item, repeats checkout with the same key, retrieves the order and coupons, requests admin recovery, and prints the report. It changes database state. With `n=1` on a fresh database, it also demonstrates redeeming the earned coupon on a second order. The base URL can be changed with `API_BASE_URL`.
+
+```sh
+npm test
+npm run test:smoke
+```
+
+Tests use isolated temporary databases. The concurrency suite starts independent Node processes sharing the same SQLite file, holds its writer lock until both requests arrive, and then releases the competing requests. The smoke command builds the service and runs its setup and HTTP walkthrough using only compiled application JavaScript and a temporary database; an existing development server is not required.
+
+See [API.md](API.md) for all requests, responses, statuses, and errors; see [DECISIONS.md](DECISIONS.md) for invariants, trade-offs, AI use, and deferred work.
+
+## Important behavior
+
+- Prices are public decimal INR strings such as `"200.34"`. Internally they are integer paise, with exact BigInt arithmetic and percentage discounts rounded down once on the subtotal.
+- Carts use live prices and do not reserve stock. Checkout revalidates inventory. Order snapshots remain unchanged when product data changes.
+- Checkout requires `Idempotency-Key`. An identical successful retry returns the original response; a different cart or coupon with the same customer-scoped key returns `409`.
+- Milestones count successful orders across the store. The customer placing the milestone order gets a single-use coupon automatically, usable only on a later order belonging to that customer.
+- Admin coupon generation repairs an eligible milestone missing its coupon. Normally it returns `409 NO_ELIGIBLE_MILESTONE` because automatic issuance already generated the reward. It cannot create arbitrary promotional coupons.
+- Reports are read-only and derive revenue from immutable order snapshots, not current product prices.
+- Authentication is deliberately excluded. Customer IDs are trusted inputs; ownership validation is a domain rule, not an authorization boundary. Routes under `/api/admin` are administrative.
+
+## Commands and structure
+
+| Command                       | Purpose                                                      |
+| ----------------------------- | ------------------------------------------------------------ |
+| `npm run dev`                 | Nodemon + tsx; type checking is a separate command           |
+| `npm run typecheck`           | Check application and test TypeScript                        |
+| `npm run build` / `npm start` | Compile / run compiled server                                |
+| `npm run db:setup`            | Apply committed migrations, initialize policy, seed products |
+| `npm run db:migrate`          | Apply migrations and initialize/check policy                 |
+| `npm run db:seed`             | Seed missing products after migrations                       |
+| `npm run db:generate`         | Generate migrations after changing Drizzle schema            |
+| `npm run db:studio`           | Open Drizzle's database browser                              |
+| `npm test`                    | Business-rule, HTTP, and separate-process concurrency tests  |
+| `npm run test:smoke`          | Build and evaluate compiled JavaScript in isolation          |
+| `npm run demo`                | Evaluate an already running server                           |
 
 ```text
 src/
-  app.ts            Express app and middleware
-  server.ts         HTTP server and shutdown
-  config/           Environment configuration
-  routes/           Route definitions
-  controllers/      Request/response handling
-  services/         Business logic
-  repositories/     Database queries
-  db/               SQLite connection, Drizzle schema and config
-  middlewares/      Shared Express middleware
-  types/            Shared TypeScript types
-  utils/            Helpers
-dist/               Generated JavaScript (ignored by Git)
-data/               Local SQLite database (ignored by Git)
-migrations/         Generated SQL migrations (commit these)
+  app.ts, server.ts   App factory and server lifecycle
+  config/            Validated environment settings
+  controllers/       HTTP contracts and Zod validation
+  routes/            Route registration
+  services/          Business rules and transaction boundaries
+  repositories/      Reads bound to a connection or active transaction
+  db/                Schema, connection factory, setup tooling, seed data
+  middlewares/       Consistent error responses
+  types/             Shared response types
+  utils/             Exact money arithmetic and domain errors
+  scripts/           Executable API walkthrough
+  tests/             Isolated tests and process workers; excluded from production build
+migrations/          Committed SQL and Drizzle migration metadata
+dist/                Generated JavaScript; ignored by Git
+data/                Local SQLite files; ignored by Git
 ```
 
-## Database
+## Dependency audit and submission
 
-Drizzle ORM provides typed SQLite queries using the `better-sqlite3` driver. The database file is created automatically on server startup, with foreign keys and WAL enabled. The schema starts empty so you can define the assignment's actual entities in `src/db/schema.ts`.
+`npm audit --omit=dev` reports zero runtime vulnerabilities at verification. Seven development-tool advisories remain in the Nodemon/Drizzle Kit dependency chains; npm's proposed fixes downgrade those tools to incompatible older versions, so those fixes were not applied. Review upstream releases before production use.
 
-After defining tables:
-
-```sh
-npm run db:generate
-npm run db:migrate
-```
-
-Generate and commit migrations whenever the schema changes, and apply them before starting the application. Migrations are not applied automatically at startup. For a custom database location, create its parent directory before running migrations on a fresh deployment. `npm run db:studio` opens the database browser.
-
-## Dependency audit
-
-The initial installation reported seven development-tool advisories in Nodemon and Drizzle Kit dependency chains. npm's suggested fixes downgrade these tools to older incompatible versions, so they have not been applied. Review `npm audit` as upstream releases become available.
+The repository has meaningful local commits and no configured publishing destination. Before submission, review the implementation, add any human review time to the estimate in `DECISIONS.md`, and publish to your GitHub repository.

@@ -19,7 +19,8 @@
       "name": "Customers"
     },
     {
-      "name": "Products"
+      "name": "Products",
+      "description": "List products and manage the catalog. Creation and update are administrative operations."
     },
     {
       "name": "Carts"
@@ -884,7 +885,7 @@
     },
     "/admin/products": {
       "post": {
-        "tags": ["Administration"],
+        "tags": ["Products"],
         "operationId": "createProduct",
         "summary": "Create a product",
         "description": "Administrative. Creates a generated UUID product with exact INR unit price and nonnegative stock. All three fields are required; currency is always INR. Retrying creation can create another product.",
@@ -926,7 +927,7 @@
     },
     "/admin/products/{productId}": {
       "patch": {
-        "tags": ["Administration"],
+        "tags": ["Products"],
         "operationId": "updateProduct",
         "summary": "Update product name, price or stock",
         "description": "Administrative partial update. Supply at least one field; omitted fields are preserved and ID cannot change. Inventory replaces the absolute current available count. Updates serialize with checkout. Existing carts use the updated price and availability, while previous orders and revenue retain their purchase snapshots.",

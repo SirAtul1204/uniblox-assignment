@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791295966271,
+      "tag": "0000_overjoyed_komodo",
+      "breakpoints": true
+    }
+  ]
+}

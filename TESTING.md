@@ -1,0 +1,29 @@
+# Test coverage by flow
+
+Run `npm test`, `npm run typecheck`, and `npm run test:smoke`. Tests use isolated migrated databases; they do not consume development inventory. The smoke command includes a production build and compiled-server HTTP evaluation.
+
+| Flow / risk                                        | Automated coverage                                                                                                                                                                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Customer creation and missing ownership            | `service.test.ts`, `flows.test.ts`: input validation, missing customer, separate customers, owned carts and rewards                                                                                |
+| Product creation, partial updates, current catalog | `products.test.ts`, `flows.test.ts`: exact prices, absolute inventory, omitted fields, invalid changes, zero stock                                                                                 |
+| Cart creation, retrieval, multiple items           | `service.test.ts`, `flows.test.ts`: live totals, multiple products, current availability                                                                                                           |
+| Quantity replacement and removal                   | `service.test.ts`: absolute PUT, repeated PUT/DELETE, invalid quantities and unknown products                                                                                                      |
+| Empty, stale-stock, and completed carts            | `service.test.ts`, `products.test.ts`, `flows.test.ts`: rejection, corrected retry, completed PUT/DELETE and second checkout                                                                       |
+| Successful checkout and immutable history          | `service.test.ts`, `products.test.ts`, `flows.test.ts`: live prices, snapshots, order retrieval and inventory decrement                                                                            |
+| Exact money and rounding                           | `money.test.ts`, `service.test.ts`, `flows.test.ts`: decimal parsing/formatting, bounds, subtotal rounding across multiple lines, 100% discount, large report sums                                 |
+| Durable idempotency                                | `service.test.ts`, `flows.test.ts`: identical response/header, changed cart/coupon conflict, customer scope, failed-key reuse, replay after redemption and reopening                               |
+| Store-wide reward milestones                       | `service.test.ts`, `flows.test.ts`: milestone ownership across customers, automatic issuance, discounted order earns another reward, replay/failure do not count                                   |
+| Coupon ownership and single redemption             | `service.test.ts`, `flows.test.ts`: mismatch, redemption linkage, reuse rejection, unchanged state after rejection                                                                                 |
+| Admin recovery                                     | `service.test.ts`, `reward-policy.test.ts`, `flows.test.ts`: no eligible milestone, one reward per milestone, oldest missing first, historical policy, unchanged original replay                   |
+| Policy configuration and migration                 | `reward-policy.test.ts`, `flows.test.ts`: changed policy, continuing ordinals, historical snapshots, legacy migration, startup rejects invalid n/x and accepts boundaries                          |
+| Rollback and useful HTTP errors                    | `service.test.ts`, `flows.test.ts`: injected failure after stock/order/coupon writes, sanitized logged 500, successful retry, malformed input, missing resources, body limit, 503 with Retry-After |
+| Report reconciliation and persistence              | `service.test.ts`, `flows.test.ts`: gross minus discounts equals net, quantities and coupon counts, zero-purchase products, stable reads, reopened database                                        |
+| Repeatable setup and seed                          | `service.test.ts`, `compiled-smoke.ts`: seed preserves prices/stock, missing setup, repeated compiled setup                                                                                        |
+| Documentation and executable evaluation            | `openapi.test.ts`, `compiled-smoke.ts`: specification validates all operations, local Swagger delivery, browser walkthrough, compiled HTTP demo                                                    |
+| Independent-process races                          | `concurrency.test.ts`: repricing versus checkout, identical checkout keys, different keys on one cart, final stock, coupon redemption, admin generation                                            |
+
+All named `.test.ts` files are under [src/tests](src/tests/). Race tests use independent worker servers sharing one SQLite file and a writer-lock barrier, rather than relying on single-process request timing.
+
+The [Postman collection](postman/checkout-rewards.postman_collection.json) separately exercises the ordered six-purchase customer-to-report journey. It was verified with Newman against default, 100%, and above-five milestone policies, including repeat runs. Newman is optional and not invoked by `npm test`; its command is in the [Postman guide](postman/README.md).
+
+These tests cover the implemented business flows and targeted failure modes, not every possible input or production condition. Sustained load, machine crashes, disk failures, real payments, and authentication remain outside this assignment's scope. No numeric code-coverage percentage is claimed.

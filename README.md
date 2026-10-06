@@ -58,6 +58,8 @@ npm run test:smoke
 
 Tests use isolated temporary databases. The concurrency suite starts independent Node processes sharing the same SQLite file, holds its writer lock until both requests arrive, and then releases the competing requests. The smoke command builds the service and runs its setup and HTTP walkthrough using only compiled application JavaScript and a temporary database; an existing development server is not required.
 
+See [TESTING.md](TESTING.md) for the flow-to-test mapping, including the complete multi-product customer-to-report HTTP journey, coupon recovery, rollback, persistence, and configuration validation.
+
 See [API.md](API.md) for all requests, responses, statuses, and errors; see [DECISIONS.md](DECISIONS.md) for invariants, trade-offs, AI use, and deferred work.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the architecture diagram, entity relationship diagram, and customer/administrator flow diagram.

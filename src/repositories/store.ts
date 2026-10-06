@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { Executor } from "../db";
 import {
   cartItems,
@@ -8,7 +8,6 @@ import {
   customers,
   orderItems,
   orders,
-  policy,
   products,
 } from "../db/schema";
 import { AppError } from "../utils/errors";
@@ -74,8 +73,15 @@ export class StoreRepository {
       .orderBy(asc(orderItems.productId))
       .all();
   }
-  rewardPolicy() {
-    return this.db.select().from(policy).where(eq(policy.id, 1)).get()!;
+  latestOrderOrdinal() {
+    return (
+      this.db
+        .select({ ordinal: orders.ordinal })
+        .from(orders)
+        .orderBy(sql`${orders.ordinal} DESC`)
+        .limit(1)
+        .get()?.ordinal ?? 0
+    );
   }
   checkout(customerId: string, key: string) {
     return this.db

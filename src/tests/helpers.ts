@@ -5,7 +5,7 @@ import type { TestContext } from "node:test";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import request from "supertest";
 import { createApp } from "../app";
-import { initializePolicy, openDatabase, type RewardPolicy } from "../db";
+import { openDatabase, type RewardPolicy } from "../db";
 import { seed, seedProducts } from "../db/seed";
 import { StoreService, type StoreHooks } from "../services/store";
 
@@ -25,15 +25,27 @@ export function fixture(
   const path = options.file ? join(dir, "test.sqlite") : ":memory:";
   const context = openDatabase(path, options.timeout);
   migrate(context.db, { migrationsFolder: resolve("migrations") });
-  initializePolicy(context.db, options.policy ?? { everyN: 5, percent: 10 });
+  const rewardPolicy = options.policy ?? { everyN: 5, percent: 10 };
   seed(context.db);
-  const service = new StoreService(context.db, options.hooks);
-  const app = createApp(context, { hooks: options.hooks, log: () => {} });
+  const service = new StoreService(context.db, rewardPolicy, options.hooks);
+  const app = createApp(context, {
+    rewardPolicy,
+    hooks: options.hooks,
+    log: () => {},
+  });
   t.after(() => {
     if (context.sqlite.open) context.sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { ...context, dir, path, service, app, api: request(app) };
+  return {
+    ...context,
+    rewardPolicy,
+    dir,
+    path,
+    service,
+    app,
+    api: request(app),
+  };
 }
 
 export function populatedCart(

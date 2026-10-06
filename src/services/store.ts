@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
-import type { Db, Executor } from "../db";
+import type { Db, Executor, RewardPolicy } from "../db";
 import {
   cartItems,
   carts,
@@ -9,11 +9,11 @@ import {
   customers,
   orderItems,
   orders,
-  policy,
   products,
 } from "../db/schema";
 import { StoreRepository } from "../repositories/store";
 import type { CheckoutResponse, CouponView, OrderView } from "../types/api";
+import { env } from "../config/env";
 import { AppError } from "../utils/errors";
 import { calculateTotals, formatMoney, safeInteger } from "../utils/money";
 
@@ -38,15 +38,13 @@ function orderView(repo: StoreRepository, id: string): OrderView {
     ordinal: row.ordinal,
     currency: "INR",
     createdAt: row.createdAt,
-    items: repo
-      .orderItems(id)
-      .map((item) => ({
-        productId: item.productId,
-        name: item.productName,
-        quantity: item.quantity,
-        unitPrice: formatMoney(item.unitPriceMinor),
-        lineTotal: formatMoney(item.lineTotalMinor),
-      })),
+    items: repo.orderItems(id).map((item) => ({
+      productId: item.productId,
+      name: item.productName,
+      quantity: item.quantity,
+      unitPrice: formatMoney(item.unitPriceMinor),
+      lineTotal: formatMoney(item.lineTotalMinor),
+    })),
     subtotal: formatMoney(row.subtotalMinor),
     discount: formatMoney(row.discountMinor),
     total: formatMoney(row.totalMinor),
@@ -99,6 +97,7 @@ export interface StoreHooks {
 export class StoreService {
   constructor(
     private readonly db: Db,
+    private readonly reward: RewardPolicy = env,
     private readonly hooks: StoreHooks = {},
   ) {}
 
@@ -183,8 +182,7 @@ export class StoreService {
     tx: Executor,
     order: typeof orders.$inferSelect,
   ): CouponView {
-    const reward = new StoreRepository(tx).rewardPolicy();
-    if (order.ordinal % reward.everyN !== 0)
+    if (order.ordinal % order.rewardEveryN !== 0)
       throw new AppError(
         409,
         "NO_ELIGIBLE_MILESTONE",
@@ -195,7 +193,7 @@ export class StoreService {
       code: randomBytes(16).toString("hex"),
       customerId: order.customerId,
       milestoneOrderId: order.id,
-      percent: reward.percent,
+      percent: order.rewardPercent,
       redeemedOrderId: null,
       createdAt: new Date().toISOString(),
     };
@@ -256,13 +254,15 @@ export class StoreService {
           ),
         );
         const totals = calculateTotals(subtotal, coupon?.percent);
-        const reward = repo.rewardPolicy();
-        const ordinal = safeInteger(BigInt(reward.orderCount) + 1n);
+        const reward = this.reward;
+        const ordinal = safeInteger(BigInt(repo.latestOrderOrdinal()) + 1n);
         const order = {
           id: randomUUID(),
           cartId,
           customerId: cart.customerId,
           ordinal,
+          rewardEveryN: reward.everyN,
+          rewardPercent: reward.percent,
           ...totals,
           couponCode: coupon?.code ?? null,
           couponPercent: coupon?.percent ?? null,
@@ -325,10 +325,6 @@ export class StoreService {
           .set({ status: "checked_out" })
           .where(eq(carts.id, cartId))
           .run();
-        tx.update(policy)
-          .set({ orderCount: ordinal })
-          .where(eq(policy.id, 1))
-          .run();
         const earnedCoupon =
           ordinal % reward.everyN === 0 ? this.generateReward(tx, order) : null;
         const response: CheckoutResponse = {
@@ -367,14 +363,13 @@ export class StoreService {
   generateCoupon() {
     return this.db.transaction(
       (tx) => {
-        const reward = new StoreRepository(tx).rewardPolicy();
         const eligible = tx
           .select({ order: orders })
           .from(orders)
           .leftJoin(coupons, eq(orders.id, coupons.milestoneOrderId))
           .where(
             and(
-              sql`${orders.ordinal} % ${reward.everyN} = 0`,
+              sql`${orders.ordinal} % ${orders.rewardEveryN} = 0`,
               isNull(coupons.id),
             ),
           )

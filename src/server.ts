@@ -5,7 +5,7 @@ import { assertReady, openDatabase } from "./db";
 const context = openDatabase(env.databasePath);
 const { sqlite } = context;
 try {
-  assertReady(context.db, env);
+  assertReady(context.db);
 } catch (error) {
   sqlite.close();
   throw error;

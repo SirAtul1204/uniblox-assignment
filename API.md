@@ -106,7 +106,7 @@ Codes are case-sensitive. Redemption changes `status` to `"redeemed"` and record
 
 ### `GET /health`
 
-No body. **200**: `{ "status": "ok" }`. Checks database connectivity; startup checks schema and configured reward policy readiness. Unexpected failures return **500**.
+No body. **200**: `{ "status": "ok" }`. Checks database connectivity; startup checks schema readiness. Unexpected failures return **500**.
 
 ### `POST /customers`
 
@@ -166,7 +166,7 @@ The response contains the complete Order; `earnedCoupon` is the complete Coupon 
 
 After a successful commit, the same key, cart, and coupon replay the original **201** JSON response with `Idempotency-Replayed: true`. This works after a process restart, subsequent price changes, and later redemption of the earned coupon. The replayed earned coupon status is its original snapshot; use the customer coupon list for its current status.
 
-Changing or omitting the original coupon on a successful retry is a conflict. Keys for failed attempts are not persisted; correct the problem and reuse the key. Inventory, coupon, cart, reward counter, order, and successful replay record commit together or all roll back.
+Changing or omitting the original coupon on a successful retry is a conflict. Keys for failed attempts are not persisted; correct the problem and reuse the key. Inventory, coupon, cart, order ordinal, order, and successful replay record commit together or all roll back.
 
 ### `GET /orders/:orderId`
 
@@ -182,7 +182,7 @@ Body: `{}` or omitted. Arbitrary codes, owners, and percentages cannot be suppli
 
 **201**: Coupon for the oldest reached milestone missing its coupon, assigned to the milestone order's customer. **400**: unexpected body fields. **409 `NO_ELIGIBLE_MILESTONE`**: no eligible missing reward. **503 `DATABASE_BUSY`**: lock timeout.
 
-Normal checkout automatically issues coupons, so this operation usually returns **409**. It supports recovery/import scenarios, not promotional campaigns. No public API intentionally removes coupons to make a milestone eligible again.
+Normal checkout automatically issues coupons, so this operation usually returns **409**. It supports recovery/import scenarios, not promotional campaigns. Eligibility and discount percentage come from the milestone order's historical policy snapshot, even after the active environment policy changes. No public API intentionally removes coupons to make a milestone eligible again.
 
 ### `GET /admin/report` — administrative
 

@@ -59,21 +59,6 @@ export const cartItems = sqliteTable(
     check("cart_quantity_valid", sql`${t.quantity} BETWEEN 1 AND ${max}`),
   ],
 );
-export const policy = sqliteTable(
-  "reward_policy",
-  {
-    id: integer("id").primaryKey(),
-    everyN: integer("every_n").notNull(),
-    percent: integer("percent").notNull(),
-    orderCount: integer("order_count").notNull().default(0),
-  },
-  (t) => [
-    check("singleton_policy", sql`${t.id} = 1`),
-    check("policy_n_valid", sql`${t.everyN} BETWEEN 1 AND ${max}`),
-    check("policy_percent_valid", sql`${t.percent} BETWEEN 1 AND 100`),
-    check("order_count_valid", sql`${t.orderCount} BETWEEN 0 AND ${max}`),
-  ],
-);
 export const orders = sqliteTable(
   "orders",
   {
@@ -86,6 +71,8 @@ export const orders = sqliteTable(
       .notNull()
       .references(() => customers.id),
     ordinal: integer("ordinal").notNull().unique(),
+    rewardEveryN: integer("reward_every_n").notNull().default(5),
+    rewardPercent: integer("reward_percent").notNull().default(10),
     subtotalMinor: integer("subtotal_minor").notNull(),
     discountMinor: integer("discount_minor").notNull(),
     totalMinor: integer("total_minor").notNull(),

@@ -6,7 +6,7 @@
 2. A cart creates at most one order and cannot be changed after checkout.
 3. Successful retries replay one durable response without additional inventory, orders, or rewards.
 4. A coupon belongs to one customer, is generated once per milestone, and is redeemed by at most one later order.
-5. Failed checkout consumes no stock or coupon and increments no reward counter.
+5. Failed checkout consumes no stock or coupon and advances no successful-order ordinal.
 6. Orders retain the product and pricing facts used at purchase time.
 7. Money calculations are exact; discounts cannot exceed subtotal.
 8. Reports reconcile with stored orders and coupons and never generate rewards or mutate state.
@@ -69,7 +69,7 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 **Choice:** Store-wide serialized successful order ordinal; every nth order earns one customer-specific coupon. Discounted orders count. No expiry or stacking. A coupon can only be used on a later order and snapshots its percentage.
 
-**Why:** Store-wide counting follows the brief, and customer-specific ownership reflects the requested reward model. A transactionally updated counter makes concurrent milestone assignment unambiguous. Failed and replayed checkouts never increment it.
+**Why:** Store-wide counting follows the brief, and customer-specific ownership reflects the requested reward model. The next ordinal is derived from the latest committed order while holding the immediate transaction writer lock, making concurrent milestone assignment unambiguous. Failed and replayed checkouts never advance it.
 
 **Consequences:** Under concurrent purchases, whichever commits the milestone ordinal earns the coupon; arrival order is not promised. Customers need an identity resource. Ownership is verified against the cart, but without authentication callers can claim another customer's ID; this is an explicit assignment limitation.
 
@@ -85,17 +85,17 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 **Consequences:** Admin generation normally returns `409 NO_ELIGIBLE_MILESTONE`; it has value for imported/legacy missing rewards rather than everyday issuance. It is deliberately not a marketing coupon feature. Recovery tests simulate missing issuance through database fixtures; the service has no coupon deletion endpoint. Concurrent admin requests cannot duplicate a reward. Recovery does not rewrite an already stored historical checkout response.
 
-## Decision: Reward policy fixed per database
+## Decision: Environment-only active policy with historical order snapshots
 
 **Context:** Changing n can redefine which historical orders were milestones; changing x can silently change promised discounts.
 
-**Options considered:** Mutable environment-only policy; versioned effective policies; immutable initialized policy.
+**Options considered:** Immutable database settings; environment-only configuration without history; environment configuration with immutable order snapshots; centrally managed effective policy versions.
 
-**Choice:** Validate n/x on startup and persist them during setup. Reject a mismatch against the database's existing policy. Coupons retain the percentage assigned at generation.
+**Choice:** Validate n/x from the environment on startup; they are the sole source of active configuration. Each new order snapshots its n/x. Coupon generation and admin recovery evaluate that order's ordinal against its own n, and use its historical x. Existing coupons keep their assigned percentage. No active policy table or duplicate order counter remains.
 
-**Why:** Versioned policy changes are useful but add migration and eligibility rules beyond the timebox. Explicit refusal is safer than silently reinterpreting history.
+**Why:** The user requested one active source of truth and the ability to change configuration without a database update. Historical order snapshots prevent that change from reinterpreting past eligibility or promises. Snapshot data describes a completed purchase rather than configuring future checkouts.
 
-**Consequences:** Change experiments use a new database path. Real policy changes require a designed version/effective-order migration. Seeding is idempotent and never resets the order counter, prices, or inventory.
+**Consequences:** Changes take effect after restart. All instances must receive the same configuration; mixed configurations during a rolling restart are not coordinated by the database. The global order sequence continues unchanged, with new eligibility computed as `ordinal % active n === 0`. The migration backfills existing orders from the legacy database policy before dropping it, without changing coupons or replay responses. Seeding never resets purchases, prices, or inventory.
 
 ## Decision: Reporting from snapshots in a consistent read transaction
 
@@ -125,13 +125,13 @@ Database foreign keys, unique indexes, and check constraints enforce structural 
 
 Implemented: durable SQLite persistence, committed migrations, repeatable setup/seed, customers, carts, live price/inventory validation, exact INR totals, immutable orders, durable checkout replay, atomic owned-coupon redemption, automatic milestone rewards, gated admin recovery, consistent reporting, validation/error contracts, separate-process races, rollback fault injection, compiled-service smoke evaluation, and API documentation.
 
-Deferred: authentication/authorization, product administration, inventory reservations, payments, cancellation/refunds, frontend, policy versioning, coupon expiry/stacking/promotional issuance, pagination, distributed rate limiting, structured operational metrics, idempotency retention/cleanup, backups, and production deployment. The seven development dependency advisories remain documented; runtime audit reports zero at verification. Do not expose the authentication-free admin endpoints publicly as a production service.
+Deferred: authentication/authorization, product administration, inventory reservations, payments, cancellation/refunds, frontend, centrally coordinated policy versioning, coupon expiry/stacking/promotional issuance, pagination, distributed rate limiting, structured operational metrics, idempotency retention/cleanup, backups, and production deployment. The seven development dependency advisories remain documented; runtime audit reports zero at verification. Do not expose the authentication-free admin endpoints publicly as a production service.
 
 ## Multiple instances and production scale
 
 SQLite's locks protect separate local processes using the same database file, as tested. This is not a design for separate servers each holding their own database or an arbitrarily shared network filesystem. At production scale, move to PostgreSQL with row locks or conditional updates, unique constraints, transaction-bound queries, and explicit retry handling for serialization/deadlock failures. Lock inventory rows in deterministic product order and atomically serialize the reward ordinal. Preserve durable idempotency and coupon constraints.
 
-Add authenticated customer identity and admin authorization. Introduce payment recovery before real charging, version reward policies, paginate lists, replace full-table reports, and add backups, operational metrics, load tests, and reconciliation jobs.
+Add authenticated customer identity and admin authorization. Introduce payment recovery before real charging, coordinate policy rollouts across instances, paginate lists, replace full-table reports, and add backups, operational metrics, load tests, and reconciliation jobs.
 
 ## AI use and corrections
 
@@ -139,10 +139,12 @@ Codex assisted with repository inspection, design discussion, implementation, te
 
 Material redirections: the initial money plan exposed minor-unit fields; the user requested readable INR prices, so the public contract changed to decimal strings while keeping exact paise arithmetic. Unrestricted admin coupons were considered, then rejected; automatic generation and milestone-gated recovery were explicitly retained. Concurrency testing was strengthened from potentially sequential single-process requests to independent HTTP processes coordinated by a held writer lock.
 
+A later user-directed change made environment variables the sole active policy source. Order snapshots, migration-backfill tests, and policy-change tests preserve historical eligibility and discounts without retaining an active settings table.
+
 A concrete generated-code correction: an early read-only report test compared a nonexistent `better-sqlite3` `totalChanges` property, making the runtime comparison ineffective. Type checking exposed it. The test now queries the real SQLite `SELECT total_changes()` value before and after report requests, so writes would be detected.
 
 ## Time spent and next two hours
 
-Approximate AI-assisted implementation and verification time: 20 minutes, excluding earlier setup/planning and subsequent human review. This is an implementation-session estimate; add actual human review and submission time before sending the assignment.
+Approximate AI-assisted implementation and verification time: 30 minutes, including the environment-policy revision and excluding earlier setup/planning and subsequent human review. Add actual human review and submission time before sending the assignment.
 
-With another two hours, first review the transaction and replay paths against the tests, then add authenticated identity/admin guards, investigate compatible fixes for development dependency advisories, and measure SQLite contention and report memory usage. Next prioritize policy versioning and a payment state machine only if those capabilities become required.
+With another two hours, first review the transaction and replay paths against the tests, then add authenticated identity/admin guards, investigate compatible fixes for development dependency advisories, and measure SQLite contention and report memory usage. Next prioritize coordinated policy rollouts and a payment state machine only if those capabilities become required.

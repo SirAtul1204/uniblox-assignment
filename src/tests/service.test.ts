@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { eq } from "drizzle-orm";
-import { assertReady, initializePolicy, openDatabase } from "../db";
+import { assertReady, openDatabase } from "../db";
 import { seed } from "../db/seed";
 import {
   cartItems,
@@ -10,7 +10,6 @@ import {
   coupons,
   orderItems,
   orders,
-  policy,
   products,
 } from "../db/schema";
 import { StoreService } from "../services/store";
@@ -143,7 +142,7 @@ test("idempotency replays the original response, rejects conflicts, and survives
   f.sqlite.close();
   const reopened = openDatabase(f.path);
   try {
-    assertReady(reopened.db, { everyN: 1, percent: 10 });
+    assertReady(reopened.db);
     assert.deepEqual(
       new StoreService(reopened.db).checkout(first.cartId, "same-key").response,
       initial.body,
@@ -260,7 +259,7 @@ test("exception after inventory and coupon mutations rolls everything back", (t)
     .from(products)
     .where(eq(products.id, productId))
     .get()!.inventory;
-  const faulty = new StoreService(f.db, {
+  const faulty = new StoreService(f.db, f.rewardPolicy, {
     afterCheckoutMutations: () => {
       throw new Error("injected failure");
     },
@@ -276,7 +275,7 @@ test("exception after inventory and coupon mutations rolls everything back", (t)
     inventory,
   );
   assert.equal(f.service.getCart(second.cartId).status, "open");
-  assert.equal(f.db.select().from(policy).get()!.orderCount, 1);
+  assert.equal(f.service.report().totalOrders, 1);
   assert.equal(f.db.select().from(checkouts).all().length, 1);
   assert.equal(f.db.select().from(orderItems).all().length, 1);
   assert.equal(
@@ -329,7 +328,7 @@ test("reports reconcile with orders, remain read-only, and include zero purchase
   assert.equal(report.body.coupons.redeemed, 1);
 });
 
-test("seed is repeatable and policy changes or missing setup fail clearly", (t) => {
+test("seed is repeatable and missing setup fails clearly", (t) => {
   const f = fixture(t);
   f.db
     .update(products)
@@ -348,20 +347,10 @@ test("seed is repeatable and policy changes or missing setup fail clearly", (t) 
       .priceMinor,
     123,
   );
-  assert.throws(
-    () => initializePolicy(f.db, { everyN: 3, percent: 10 }),
-    /differs/,
-  );
-  assert.throws(
-    () => assertReady(f.db, { everyN: 5, percent: 20 }),
-    /not ready/,
-  );
+  assertReady(f.db);
   const empty = openDatabase(":memory:");
   try {
-    assert.throws(
-      () => assertReady(empty.db, { everyN: 5, percent: 10 }),
-      /db:setup/,
-    );
+    assert.throws(() => assertReady(empty.db), /db:setup/);
   } finally {
     empty.sqlite.close();
   }

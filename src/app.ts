@@ -1,17 +1,21 @@
 import express from "express";
 import { createErrorHandler } from "./middlewares/error-handler";
 import { createRouter } from "./routes";
-import type { DatabaseContext } from "./db";
+import type { DatabaseContext, RewardPolicy } from "./db";
 import type { StoreHooks } from "./services/store";
 
 export function createApp(
   context: DatabaseContext,
-  options: { hooks?: StoreHooks; log?: (error: unknown) => void } = {},
+  options: {
+    rewardPolicy?: RewardPolicy;
+    hooks?: StoreHooks;
+    log?: (error: unknown) => void;
+  } = {},
 ) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "16kb" }));
-  app.use("/api", createRouter(context, options.hooks));
+  app.use("/api", createRouter(context, options.rewardPolicy, options.hooks));
   app.use((_req, res) => {
     res
       .status(404)

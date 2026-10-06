@@ -1,11 +1,17 @@
 import { Router } from "express";
-import type { DatabaseContext } from "../db";
+import type { DatabaseContext, RewardPolicy } from "../db";
 import { StoreController } from "../controllers/store";
 import { StoreService, type StoreHooks } from "../services/store";
 
-export function createRouter(context: DatabaseContext, hooks?: StoreHooks) {
+export function createRouter(
+  context: DatabaseContext,
+  rewardPolicy?: RewardPolicy,
+  hooks?: StoreHooks,
+) {
   const router = Router();
-  const controller = new StoreController(new StoreService(context.db, hooks));
+  const controller = new StoreController(
+    new StoreService(context.db, rewardPolicy, hooks),
+  );
   router.get("/health", (_req, res) => {
     context.sqlite.prepare("SELECT 1").get();
     res.json({ status: "ok" });

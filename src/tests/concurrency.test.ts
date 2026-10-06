@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import test from "node:test";
 import { eq } from "drizzle-orm";
-import type { DatabaseContext } from "../db";
+import type { DatabaseContext, RewardPolicy } from "../db";
 import { coupons, orders, products } from "../db/schema";
 import { fixture, limitedId, populatedCart, productId } from "./helpers";
 
@@ -51,11 +51,21 @@ function waitMessage(
     child.once("error", onError);
   });
 }
-async function startWorker(path: string): Promise<Worker> {
+async function startWorker(
+  path: string,
+  rewardPolicy: RewardPolicy,
+): Promise<Worker> {
   const child = spawn(
     process.execPath,
     ["--import", "tsx", resolve("src/tests/worker.ts"), path],
-    { stdio: ["ignore", "pipe", "pipe", "ipc"] },
+    {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      env: {
+        ...process.env,
+        REWARD_EVERY_N_ORDERS: String(rewardPolicy.everyN),
+        REWARD_DISCOUNT_PERCENT: String(rewardPolicy.percent),
+      },
+    },
   );
   let output = "";
   child.stderr?.on("data", (chunk) => {
@@ -83,11 +93,12 @@ async function stopWorker(worker: Worker) {
 }
 async function withWorkers(
   path: string,
+  rewardPolicy: RewardPolicy,
   run: (workers: [Worker, Worker]) => Promise<void>,
 ) {
   const started = await Promise.allSettled([
-    startWorker(path),
-    startWorker(path),
+    startWorker(path, rewardPolicy),
+    startWorker(path, rewardPolicy),
   ]);
   const workers = started
     .filter(
@@ -152,7 +163,7 @@ test(
   async (t) => {
     const f = fixture(t, { file: true, policy: { everyN: 1, percent: 10 } });
     const { cartId } = populatedCart(f.service);
-    await withWorkers(f.path, async (workers) => {
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
       const attempt = { route: `/carts/${cartId}/checkout`, key: "same" };
       const result = await race(f, workers, [attempt, attempt]);
       assert.deepEqual(
@@ -178,7 +189,7 @@ test(
   async (t) => {
     const f = fixture(t, { file: true });
     const { cartId } = populatedCart(f.service);
-    await withWorkers(f.path, async (workers) => {
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
       const result = await race(f, workers, [
         { route: `/carts/${cartId}/checkout`, key: "one" },
         { route: `/carts/${cartId}/checkout`, key: "two" },
@@ -205,7 +216,7 @@ test(
       .run();
     const a = populatedCart(f.service, undefined, limitedId);
     const b = populatedCart(f.service, undefined, limitedId);
-    await withWorkers(f.path, async (workers) => {
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
       const result = await race(f, workers, [
         { route: `/carts/${a.cartId}/checkout`, key: "a" },
         { route: `/carts/${b.cartId}/checkout`, key: "b" },
@@ -241,7 +252,7 @@ test(
       .earnedCoupon!;
     const a = populatedCart(f.service, first.customerId);
     const b = populatedCart(f.service, first.customerId);
-    await withWorkers(f.path, async (workers) => {
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
       const result = await race(f, workers, [
         {
           route: `/carts/${a.cartId}/checkout`,
@@ -280,7 +291,7 @@ test(
     const cart = populatedCart(f.service);
     const result = f.service.checkout(cart.cartId, "reward").response;
     f.db.delete(coupons).where(eq(coupons.id, result.earnedCoupon!.id)).run();
-    await withWorkers(f.path, async (workers) => {
+    await withWorkers(f.path, f.rewardPolicy, async (workers) => {
       const responses = await race(f, workers, [
         { route: "/admin/coupons" },
         { route: "/admin/coupons" },

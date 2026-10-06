@@ -21,7 +21,9 @@ Optionally copy `.env.example` to `.env` before setup:
 | `REWARD_EVERY_N_ORDERS`   | `5`                 | Positive integer: every nth successful store-wide order earns a reward |
 | `REWARD_DISCOUNT_PERCENT` | `10`                | Integer percentage from 1 to 100                                       |
 
-The reward policy is fixed when the database is initialized. Changing n/x later fails explicitly; restore the original settings or use a new database path. Product seeding is idempotent and never restocks or reprices existing products. Startup requires setup and reports an actionable error if it is missing.
+The environment is the sole source of the active reward policy. Change n/x in `.env` and restart the server; new orders use the new values. Each order records the policy used at checkout for historical eligibility and admin recovery, while existing coupons keep their original percentage. Changing n does not reset the store-wide order sequence: eligibility is `order ordinal % active n === 0`. All service instances must use the same environment configuration. Product seeding is idempotent and never restocks or reprices existing products. Startup requires setup and reports an actionable error if it is missing.
+
+After upgrading from the database-policy version, run `npm run db:migrate`. The migration preserves the old policy on existing orders before dropping the settings table. Historical snapshots are purchase facts, not a second source of active configuration.
 
 ```sh
 npm run typecheck
@@ -62,19 +64,19 @@ See [API.md](API.md) for all requests, responses, statuses, and errors; see [DEC
 
 ## Commands and structure
 
-| Command                       | Purpose                                                      |
-| ----------------------------- | ------------------------------------------------------------ |
-| `npm run dev`                 | Nodemon + tsx; type checking is a separate command           |
-| `npm run typecheck`           | Check application and test TypeScript                        |
-| `npm run build` / `npm start` | Compile / run compiled server                                |
-| `npm run db:setup`            | Apply committed migrations, initialize policy, seed products |
-| `npm run db:migrate`          | Apply migrations and initialize/check policy                 |
-| `npm run db:seed`             | Seed missing products after migrations                       |
-| `npm run db:generate`         | Generate migrations after changing Drizzle schema            |
-| `npm run db:studio`           | Open Drizzle's database browser                              |
-| `npm test`                    | Business-rule, HTTP, and separate-process concurrency tests  |
-| `npm run test:smoke`          | Build and evaluate compiled JavaScript in isolation          |
-| `npm run demo`                | Evaluate an already running server                           |
+| Command                       | Purpose                                                     |
+| ----------------------------- | ----------------------------------------------------------- |
+| `npm run dev`                 | Nodemon + tsx; type checking is a separate command          |
+| `npm run typecheck`           | Check application and test TypeScript                       |
+| `npm run build` / `npm start` | Compile / run compiled server                               |
+| `npm run db:setup`            | Apply committed migrations and seed products                |
+| `npm run db:migrate`          | Apply committed migrations and check schema readiness       |
+| `npm run db:seed`             | Seed missing products after migrations                      |
+| `npm run db:generate`         | Generate migrations after changing Drizzle schema           |
+| `npm run db:studio`           | Open Drizzle's database browser                             |
+| `npm test`                    | Business-rule, HTTP, and separate-process concurrency tests |
+| `npm run test:smoke`          | Build and evaluate compiled JavaScript in isolation         |
+| `npm run demo`                | Evaluate an already running server                          |
 
 ```text
 src/

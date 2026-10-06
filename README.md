@@ -52,6 +52,8 @@ Tests use isolated temporary databases. The concurrency suite starts independent
 
 See [API.md](API.md) for all requests, responses, statuses, and errors; see [DECISIONS.md](DECISIONS.md) for invariants, trade-offs, AI use, and deferred work.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the architecture diagram, entity relationship diagram, and customer/administrator flow diagram.
+
 ## Important behavior
 
 - Prices are public decimal INR strings such as `"200.34"`. Internally they are integer paise, with exact BigInt arithmetic and percentage discounts rounded down once on the subtotal.

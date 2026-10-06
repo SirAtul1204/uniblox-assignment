@@ -1,6 +1,11 @@
-import { app } from './app';
+import { createApp } from './app';
 import { env } from './config/env';
-import { sqlite } from './db';
+import { assertReady, openDatabase } from './db';
+
+const context = openDatabase(env.databasePath);
+const { sqlite } = context;
+try { assertReady(context.db, env); } catch (error) { sqlite.close(); throw error; }
+const app = createApp(context);
 
 const server = app.listen(env.port, () => {
   console.log(`Server listening on http://localhost:${env.port}`);
